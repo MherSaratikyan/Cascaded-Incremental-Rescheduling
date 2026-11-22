@@ -1,4 +1,4 @@
-"""Heavy-workload scenarios H1-H8 (built deterministically from an instance,
+"""Heavy-workload scenarios H1-H9 (built deterministically from an instance,
 its x^(0) and a seed)."""
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from experiments.generator import generate_sequence
 
 # scenarios consisting of one request: every method starts from the same state,
 # so the reference optimum P_k* (B4 with a long limit) is comparable
-SINGLE = ("H1", "H2", "H3", "H4", "H7", "H8")
-ALL = ("H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8")
+SINGLE = ("H1", "H2", "H3", "H4", "H7", "H8", "H9")
+ALL = ("H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8", "H9")
 
 TITLES = {
     "H1": "Room closed for a week (busiest room)",
@@ -25,7 +25,11 @@ TITLES = {
     "H6": "Long mixed sequence of 20 disruptions",
     "H7": "H1 under dense regulation (rho=0.5, lambda=0.3)",
     "H8": "Physically impossible: a group gets fewer hours than it needs",
+    "H9": "Busiest room closed on its busiest day, gap protection off (feasible; measures P_k/P_k*)",
 }
+
+# who is protected against new gaps by (9), per scenario (default: groups)
+GAP_PROTECT = {"H9": "none"}
 
 
 @dataclass
@@ -36,6 +40,7 @@ class HeavyScenario:
     rho: float = 0.2
     lam: float = 0.1
     notes: dict = field(default_factory=dict)
+    gap_protect: str = "groups"
 
 
 def _hours_by(inst: Instance, x0: Timetable, key) -> Counter:
@@ -138,4 +143,19 @@ def build(sid: str, inst: Instance, x0: Timetable, seed: int,
                              [Disruption("participant_unavailable", participant=g, slots=closed,
                                          note=f"group {g} needs {h} h, only {h - 1} h left")],
                              notes={"group": g, "needs": h, "available": h - 1})
+    if sid == "H9":
+        # busiest (room, day) whose closure keeps every lesson possible and hits no full lock
+        locked = {(x0[e][1], x0[e][0] // H + 1) for e, lk in locks.items() if lk == "A"}
+        load: Counter = Counter()
+        for e, (t, r) in x0.items():
+            load[(r, t // H + 1)] += inst.lessons[e].duration
+        for (room, day), _ in sorted(load.items(), key=lambda kv: (-kv[1], kv[0])):
+            if (room, day) in locked:
+                continue
+            dis = Disruption("room_unavailable", room=room, slots=[(day, p) for p in range(1, H + 1)],
+                             note=f"room {room} closed on day {day}")
+            if _still_possible(inst, dis):
+                return HeavyScenario(sid, TITLES[sid], [dis], notes={"room": room, "day": day},
+                                     gap_protect=GAP_PROTECT[sid])
+        raise RuntimeError("no room-day can be closed without an impossible lesson or a lock conflict")
     raise ValueError(f"unknown scenario {sid}")

@@ -32,7 +32,7 @@ OUTCOME_GROUPS = [
     ("memory limit", ["memory_limit"]),
     ("error", ["error", "crashed"]),
 ]
-SINGLE = ("H1", "H2", "H3", "H4", "H7", "H8")
+from experiments.scenarios import SINGLE  # noqa: E402  (single-request scenarios)
 
 
 def load(csv_path: Path) -> pd.DataFrame:
@@ -169,13 +169,18 @@ def chart_pk_ratio(df: pd.DataFrame, path: Path) -> None:
                                         markeredgecolor=SURFACE))
         for patch, m in zip(bp["boxes"], methods):
             patch.set_facecolor(METHOD_COLOR.get(m, MUTED))
+            patch.set_alpha(0.35)
             patch.set_edgecolor(SURFACE)
             patch.set_linewidth(2)
-        for i, m in enumerate(methods, 1):
-            ax.text(i, ax.get_ylim()[1], f"n={len(data[i - 1])}", ha="center", va="bottom",
-                    fontsize=8, color=MUTED)
+        rng = np.random.default_rng(0)
+        for i, (m, vals) in enumerate(zip(methods, data), 1):   # every case as a dot
+            jitter = rng.uniform(-0.08, 0.08, len(vals)) if len(vals) > 1 else np.zeros(len(vals))
+            ax.scatter(i + jitter, vals, s=42, color=METHOD_COLOR.get(m, MUTED), edgecolor=SURFACE,
+                       linewidth=1.2, zorder=3)
+        ax.set_xticks(range(1, len(methods) + 1),
+                      [METHOD_LABEL.get(m, m).replace(" ", "\n", 1) + f"\nn = {len(v)}"
+                       for m, v in zip(methods, data)])
     ax.axhline(1.0, color=MUTED, linewidth=0.8, linestyle=(0, (4, 3)))
-    ax.set_xticks(range(1, len(methods) + 1), [METHOD_LABEL.get(m, m).replace(" ", "\n", 1) for m in methods])
     fig.tight_layout()
     fig.savefig(path, facecolor=SURFACE)
     plt.close(fig)
@@ -269,7 +274,8 @@ def tables(df: pd.DataFrame) -> list[str]:
                                 ratio_max=("pk_ratio", "max"), excess_mean=("pk_excess", "mean"),
                                 optimal_share=("pk_ratio", lambda s: float((s <= 1 + 1e-9).mean())))
         out += ["## Distance from the optimum (single-request scenarios)", "",
-                "P_k* = proven minimum of P_k over the regulation-feasible set (B4, 300 s). "
+                "P_k* = proven minimum of P_k over the regulation-feasible set (reference run REF: "
+                "B4 with a long limit - 300 s in the heavy run, 120 s in the perf tests). "
                 "Methods that ignore regulations (B2, B3) can go below 1.", "",
                 md_table(sort(t), "{:.3f}"), ""]
     t = solved.groupby(keys).agg(pstar_proven=("pstar_proven", "mean"),

@@ -78,14 +78,15 @@ The instance has 20 lessons, ρ=0.3 protected and λ=0.15 locked, with random di
 
 ## Tier 2: performance smoke tests (`pytest -m perf`)
 
-These run scenarios H1, H5 and H7 on sizes S (60 lessons) and M (200 lessons) with seed 1. The methods are
-B7 and B4, plus the reference REF (B4 with a 120 s limit) for H1 and H7. **Every request runs in a fresh
+These run scenarios H1, H5, H7 and H9 on sizes S (60 lessons) and M (200 lessons) with seed 1. The methods are
+B7 and B4, plus the reference REF (B4 with a 120 s limit) for H1, H7 and H9. **Every request runs in a fresh
 process**, exactly as in the heavy workload, and the tests check the measured rows:
 
 | Test | Expected result and why |
 |---|---|
 | `test_requests_finish_within_time_and_memory_budget[method-size-scenario]` | No crash or memory-guard kill. Elapsed time ≤ 30 s limit + 10 s explanations + 15 s model building. Peak committed memory < 3 GB. |
 | `test_proposed_method_never_breaks_regulation[size-scenario]` | Every B7 solution has zero hard, protected, lock and gap-protection violations, and every proposed MCS is verified. |
+| `test_feasible_scenario_measures_distance_to_optimum[size]` | On H9 the reference proves the optimum P_k* (required on S, on M if it finishes within 120 s). B7 solves the request without regulation violations, and its P_k / P_k* (≥ 1) goes into the report. |
 | `test_changes_never_below_the_proven_optimum[size-scenario]` | P_k / P_k* ≥ 1 for B7 and B4 against the proven optimum of REF. B4 attains P_k* when both are proven. |
 | `test_outcome_classes_agree_between_b7_and_b4[size-scenario]` | Same verdict (solved or not) for single-request scenarios unless one hit the time limit (Claim 2). |
 
@@ -105,11 +106,16 @@ When the tier finishes, every measured row is saved to `experiments/results/perf
 | H6 | 20 mixed disruptions in sequence | P⁰ drift, lack of monotonicity between steps (Claim 4) |
 | H7 | H1 under dense regulation (ρ = 0.5 protected, λ = 0.3 locked) | Regulatory infeasibility, MUS/MCS |
 | H8 | One group keeps only h−1 of the h hours it needs | Physical-infeasibility proof (counting argument + CP-SAT) |
+| H9 | The busiest room is closed on its busiest day, with gap protection off | A request that is usually repairable, so P_k / P_k* against the proven optimum can be measured |
 
 Each scenario runs on sizes S, M, L and XL (60 / 200 / 500 / 1000 lessons) with 3, 3, 1 and 1 seeds,
 all 7 methods, a 30 s limit plus 10 s for explanations, and the 300 s B4 reference for the
 single-request scenarios. The run is resumable. The results go to `experiments/results/perf.csv`, and
 `experiments/results/perf_report/report.md` holds the tables and the four charts.
+
+**H9 was added after the first perf run.** Under the default regulation every single-request scenario
+(H1, H7) came out regulatorily infeasible: all groups are protected against new gaps, and x^(0) has none.
+So no solved request had a proven reference, and P_k / P_k* stayed unmeasured.
 
 Deviations from the original plan, made after the first smoke runs:
 - **H2** uses a 2-day absence instead of a whole week, because with no substitute lecturers in the model

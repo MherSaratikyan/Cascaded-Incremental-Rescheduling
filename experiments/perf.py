@@ -1,4 +1,4 @@
-"""Heavy-workload performance run: scenarios H1-H8 on sizes S, M, L, XL.
+"""Heavy-workload performance run: scenarios H1-H9 on sizes S, M, L, XL.
 
 Every request runs in a fresh process (exact peak memory, memory guard).
 Single-request scenarios also get a reference run "REF" = B4 with a long
@@ -43,7 +43,7 @@ def run_sequence(task: dict) -> list[dict]:
     is_ref = task["method"] == REF
     tl = task["ref_time"] if is_ref else task["time_limit"]
     params = Params(time_limit=tl, explain_time_limit=task["explain_time"],
-                    workers=task["solver_workers"], seed=task["seed"])
+                    workers=task["solver_workers"], seed=task["seed"], gap_protect=hs.gap_protect)
     state = State(inst, x0, x0, locks, protected, None)
     rows = []
     for k, dis in enumerate(hs.disruptions):
