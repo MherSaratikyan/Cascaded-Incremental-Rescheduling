@@ -21,6 +21,10 @@ def ctx_for(sc, disruption=None, **over):
 
 
 def test_chain_repair_found_through_cascade(chain):
+    """§6 chain: room R0 closes, A's only option (hour 2) is held by B, B's free
+    hour 3 is forbidden by the protected preference s_B, so C must move first.
+    B7 grows F = {A} -> {A,B} -> {A,B,C} (the core names B, then C) and returns
+    A->2, B->4, C->5 with no protected violation."""
     h = handle_request(make_store(chain), chain.disruptions[0], chain.params)
     r = h.result
     assert r.outcome == Outcome.SOLVED
@@ -36,11 +40,16 @@ def test_chain_repair_found_through_cascade(chain):
 
 
 def test_local_check_rejects_the_move(chain):
+    """B1, the local check of [7], only tries to place A itself; hour 2 is taken
+    by B, so the request is rejected without searching for a chain."""
     r = run_method("B1", ctx_for(chain))
     assert r.outcome == Outcome.REJECTED_LOCAL
 
 
 def test_hard_only_chain_violates_protected_preference(chain):
+    """B2 (chain with hard constraints only) finds the shorter chain A->2, B->3,
+    which breaks the protected preference s_B - the case the paper's protection
+    levels exist to prevent."""
     c = ctx_for(chain)
     r = run_method("B2", c)
     assert r.outcome == Outcome.SOLVED
@@ -49,6 +58,8 @@ def test_hard_only_chain_violates_protected_preference(chain):
 
 
 def test_regulation_limited_full_reoptimisation_agrees(chain):
+    """B4 (full re-optimisation under the same regulation) reaches the same
+    number of changes P_k as the incremental B7 on the chain example."""
     c = ctx_for(chain)
     r4, r7 = run_method("B4", c), run_method("B7", c)
     assert r4.outcome == r7.outcome == Outcome.SOLVED
@@ -56,6 +67,10 @@ def test_regulation_limited_full_reoptimisation_agrees(chain):
 
 
 def test_locked_c_gives_regulatory_infeasibility_with_mus_and_mcs(chain):
+    """§6 variant: C is fully locked.  The procedure proves regulatory
+    infeasibility (hard constraints alone are satisfiable), explains it by the
+    single MUS {lock C, s_B} and offers two verified corrections: lift the lock
+    or relax s_B.  Explanations exist in English and Armenian."""
     h = handle_request(make_store(chain, locks={"C": "A"}), chain.disruptions[0], chain.params)
     r = h.result
     assert r.outcome == Outcome.REGULATORY_INFEASIBLE
@@ -69,6 +84,8 @@ def test_locked_c_gives_regulatory_infeasibility_with_mus_and_mcs(chain):
 
 
 def test_lock_conflict_without_search(chain):
+    """Table 1 step 2: a request to move the fully locked lesson C puts C in
+    D_0 ∩ Λ^A, so a lock conflict is reported without any search iteration."""
     d = Disruption("move_request", lesson="C", day=1, hour=5, voluntary=True)
     c = ctx_for(chain, d, locks={"C": "A"})
     r = reschedule(c)
@@ -78,6 +95,10 @@ def test_lock_conflict_without_search(chain):
 
 
 def test_physical_infeasibility(chain):
+    """Two steps on one store: B's lecturer loses hours 3-4 (B stays at 2,
+    nothing to do), then R0 closes; A and B now both can only use room R1 at
+    hour 2, so even the hard-only problem is infeasible -> physical
+    infeasibility (an exact proof, not a time-out)."""
     store = make_store(chain)
     first = Disruption("participant_unavailable", participant="LB", slots=[(1, 3), (1, 4)])
     assert handle_request(store, first, chain.params).result.outcome == Outcome.SOLVED
@@ -86,6 +107,10 @@ def test_physical_infeasibility(chain):
 
 
 def test_claim3_counterexample_extra_expansion(claim3):
+    """§6 counterexample to Claim 3: A->6 is the cheapest repair (1 change) but
+    creates 3 gaps for group G1.  Delta G+ = 3 > theta_G triggers the one extra
+    expansion; with delta_k = w^T the threshold allows A->1, X->3 (2 changes,
+    no gaps), which is accepted as a lexicographic improvement."""
     h = handle_request(make_store(claim3), claim3.disruptions[0], claim3.params)
     r = h.result
     inst = h.ctx.inst
@@ -96,7 +121,10 @@ def test_claim3_counterexample_extra_expansion(claim3):
 
 
 def test_claim3_with_zero_slack_keeps_single_move(claim3):
-    params = claim3.params.with_(delta_external=0)
+    """Same counterexample with delta_k = 0: the frozen threshold P-bar = P*
+    forbids a second change, so the extra expansion is rejected and A->6 with
+    3 new gaps stays - the price of minimal change."""
+    params =claim3.params.with_(delta_external=0)
     h = handle_request(make_store(claim3), claim3.disruptions[0], params)
     r = h.result
     assert r.outcome == Outcome.SOLVED

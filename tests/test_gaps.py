@@ -41,6 +41,10 @@ def random_fixed_instance(seed: int):
 
 @pytest.mark.parametrize("seed", range(25))
 def test_gap_formulation_is_exact(seed):
+    """Claim 5 on 25 random fixed timetables (1-6 lessons of one group over two
+    days, random lunch break): minimising G over the b/a/g variables of (6)-(7)
+    gives exactly the true gap count, and forcing G one lower is infeasible -
+    so the linear formulation is exact without integrality on b, a, g."""
     inst, tt = random_fixed_instance(seed)
     if not tt:
         pytest.skip("empty")

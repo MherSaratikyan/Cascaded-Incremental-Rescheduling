@@ -33,6 +33,9 @@ def contexts(xs, n=6):
 
 
 def test_claim1_frozen_threshold_expansion_never_worsens(xs):
+    """Claim 1 (monotonicity): with P-bar frozen, growing the active set
+    F_j ⊆ F_j+1 never makes the lexicographic objective (14) worse, checked on
+    random disruptions of a generated XS instance over up to 3 expansions."""
     checked = 0
     for _, c in contexts(xs, 10):
         if not c.f0 or c.lock_conflicts:
@@ -58,6 +61,9 @@ def test_claim1_frozen_threshold_expansion_never_worsens(xs):
 
 
 def test_claim2_full_expansion_equals_regulation_limited_reoptimisation(xs):
+    """Claim 2: with F = E \\ Λ^A and B = Σ w^T the sub-problem has exactly the
+    feasible set of the regulation-constrained full re-optimisation (fully locked
+    lessons as variables with lock constraints): same feasibility, same min P_k."""
     compared = 0
     for _, c in contexts(xs, 8):
         if c.lock_conflicts or not c.f0:
@@ -73,6 +79,9 @@ def test_claim2_full_expansion_equals_regulation_limited_reoptimisation(xs):
 
 
 def test_proposed_method_agrees_with_b4_on_outcome(xs):
+    """B7 solves a request exactly when B4 does (both exact), never violates
+    hard, protected or lock constraints, and its P* is never below B4's global
+    minimum."""
     for d, c in contexts(xs, 6):
         r7, r4 = run_method("B7", c), run_method("B4", c)
         solved7, solved4 = r7.outcome == Outcome.SOLVED, r4.outcome == Outcome.SOLVED
@@ -89,6 +98,8 @@ def test_proposed_method_agrees_with_b4_on_outcome(xs):
 
 
 def test_b6_heuristic_produces_valid_or_failure(xs):
+    """B6 (local-search approximation of [4]) either returns a timetable with no
+    hard violation or reports an algorithmic failure - never an invalid result."""
     for _, c in contexts(xs, 3):
         r = run_method("B6", replace(c, params=c.params.with_(time_limit=3)))
         assert r.outcome in (Outcome.SOLVED, Outcome.ALGORITHMIC_FAILURE)
@@ -97,6 +108,8 @@ def test_b6_heuristic_produces_valid_or_failure(xs):
 
 
 def test_io_roundtrip(xs):
+    """A generated instance and its x^(0) survive JSON save/load unchanged and
+    the loaded timetable is still hard-feasible."""
     inst, x0, _, _ = xs
     d = io.instance_to_dict(inst)
     inst2 = io.instance_from_dict(d)

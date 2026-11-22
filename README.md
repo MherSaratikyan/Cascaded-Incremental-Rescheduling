@@ -24,6 +24,45 @@ Section 6 in English and Armenian.
 .venv\Scripts\python.exe -m experiments.analysis experiments\results\quick.csv --out experiments\results\quick.md
 ```
 
+What each test checks, and why, is described in [TESTS.md](TESTS.md).
+
+## Performance measurement
+
+Every measured request (test case) runs in a **fresh process**, so Windows' per-process peak
+counters belong to that request alone. Each row of the result CSVs records:
+
+| Group | Columns |
+|---|---|
+| Time | `elapsed_s` (real wall-clock time of the request), `cpu_s`, `startup_s` (process start and imports, excluded from `elapsed_s`), `process_wall_s`, phases `t_search` / `t_optimise` / `t_extra` / `t_explain`, `solver_seconds`, `solver_calls` |
+| Memory (MB) | `peak_virtual_mb` (reserved address space), `peak_commit_mb` (committed private bytes, Task Manager's "Commit size"), `peak_wset_mb` (physical RAM), `base_commit_mb` and `request_commit_mb` (growth during the request) |
+| Quality | `P_k`, `P_0`, `G`, `dG_plus` (lecturers / groups), `Q_O`, `dV_pref` / `dV_load` / `dV_room`, `changed`, `hours_moved`, `day_changes`, `room_only_moves`, `lecturers_affected`, `groups_affected`, violation counts |
+| Distance from optimal | `P_k / P_k*` and `P_k − P_k*` against a B4 reference run with a 300 s limit (heavy workload, single-request scenarios) |
+| Certification | `pstar_proven`, `lexmin_proven`, `lexmin_stages`, `opt_gap_max` |
+| Explanations | `mus_size`, `mus_minimal`, `mcs_count`, `mcs_verified` |
+| Effort | `iterations`, `F_ratio`, `max_model_vars`, `max_model_constraints`, `final_model_*` |
+
+A parent-side guard kills a request process whose committed memory passes `--mem-limit-mb`
+(default 3072). The row then records `memory_limit`, or `killed_timeout` for a hung process.
+
+Three test tiers:
+
+```powershell
+.venv\Scripts\python.exe -m pytest -q
+.venv\Scripts\python.exe -m pytest -m perf -q
+.venv\Scripts\python.exe -m experiments.perf
+```
+
+1. **Unit and paper tests** (`pytest`): about 3 minutes, and it prints the elapsed time of every test case.
+2. **Performance smoke tests** (`pytest -m perf`): about 20–30 minutes, with budgets and invariants on S and M.
+3. **Heavy workload** (`experiments.perf`): about 9–10 hours and resumable. It runs scenarios H1–H8
+   on S, M, L and XL (60 / 200 / 500 / 1000 lessons) with all methods plus the reference, and writes
+   `experiments/results/perf.csv` and `experiments/results/perf_report/report.md` with four charts:
+   elapsed time vs size, peak memory vs size, P_k/P_k*, and the outcome mix.
+
+The L and XL starting timetables x^(0) come from a greedy construction followed by windowed
+CP-SAT repair: at most 60 lessons of one day are re-optimised at a time, which keeps memory bounded.
+S and M use one full CP-SAT solve.
+
 ## Where each part of the paper lives
 
 | Paper | Code |

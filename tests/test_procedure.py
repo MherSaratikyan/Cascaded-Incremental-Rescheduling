@@ -7,6 +7,10 @@ VOLUNTARY = Disruption("move_request", lesson="A", day=1, hour=2, room="R1", vol
 
 
 def test_voluntary_chain_requires_approval(chain):
+    """Lecturer LA voluntarily asks to move A to hour 2 in R1 (delta_k = 0).
+    The chain also moves B and C, i.e. lessons of LB and LC, so step 7 asks the
+    approver; after approval the chain is committed in one transaction and every
+    affected participant gets a notification."""
     store = make_store(chain)
     seen = []
 
@@ -24,6 +28,9 @@ def test_voluntary_chain_requires_approval(chain):
 
 
 def test_rejected_chain_is_not_committed(chain):
+    """Same voluntary request, but the approver refuses: the outcome is
+    'rejected by approver', the published timetable and its version stay
+    unchanged, and the Armenian explanation names the authorised person."""
     store = make_store(chain)
     before = dict(store.timetable)
     h = handle_request(store, VOLUNTARY, chain.params, approver=lambda r, c: False)
@@ -34,6 +41,9 @@ def test_rejected_chain_is_not_committed(chain):
 
 
 def test_version_conflict_restarts_from_step_1(chain):
+    """Table 1 step 6 (optimistic concurrency): another client writes the
+    timetable while the request is being solved, so the first commit fails the
+    version check; the procedure restarts from step 1 and succeeds on attempt 2."""
     store = make_store(chain)
 
     def concurrent_writer(attempt):
@@ -47,6 +57,9 @@ def test_version_conflict_restarts_from_step_1(chain):
 
 
 def test_external_failure_persists_instance_change(chain):
+    """An external disruption that cannot be repaired (regulatory
+    infeasibility) still happened: the closed room is recorded in the store,
+    while the published timetable x^(k) is kept unchanged."""
     store = make_store(chain, locks={"C": "A"})
     h = handle_request(store, chain.disruptions[0], chain.params)
     assert h.result.outcome == Outcome.REGULATORY_INFEASIBLE
