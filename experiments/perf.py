@@ -71,6 +71,10 @@ def main(argv=None) -> None:
                     help="per-request safety cap for the search, seconds (default 1 h)")
     ap.add_argument("--explain-time", type=float, default=CAP,
                     help="cap for MUS / MCS / physical check, seconds (default 1 h)")
+    # accepted for older scripts / CI workflows; no effect: the reference optimum
+    # is now B4's own proven P* (no separate REF run)
+    ap.add_argument("--ref-time", type=float, default=None, help=argparse.SUPPRESS)
+    ap.add_argument("--no-ref", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--mem-limit-mb", type=float, default=3072)
     ap.add_argument("--solver-workers", type=int, default=2)
     ap.add_argument("--cache", default=str(ROOT / "experiments" / "instances"))
