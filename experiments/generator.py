@@ -157,7 +157,7 @@ def greedy_timetable(inst: Instance, seed: int = 0) -> Timetable:
 
     def free(e, t, r) -> bool:
         l = inst.lessons[e]
-        for tau in range(t, t + l.duration):
+        for tau in inst.cells(l, t):
             if (r, tau) in room_busy or any((u, tau) in part_busy for u in l.participants):
                 return False
             if any(res_busy[(q, tau)] >= inst.resources[q].capacity for q in l.resources):
@@ -167,7 +167,7 @@ def greedy_timetable(inst: Instance, seed: int = 0) -> Timetable:
     def place(e, t, r):
         l = inst.lessons[e]
         tt[e] = (t, r)
-        for tau in range(t, t + l.duration):
+        for tau in inst.cells(l, t):
             room_busy.add((r, tau))
             for u in l.participants:
                 part_busy.add((u, tau))
@@ -176,8 +176,10 @@ def greedy_timetable(inst: Instance, seed: int = 0) -> Timetable:
 
     def score(e, t) -> float:
         l = inst.lessons[e]
-        adj = sum(1 for u in l.participants for tau in (t - 1, t + l.duration)
-                  if (u, tau) in part_busy and tau // inst.hours == t // inst.hours)
+        cs = set(inst.cells(l, t))
+        H = inst.hours
+        adj = sum(1 for u in l.participants for c in cs for tau in (c - 1, c + 1)
+                  if tau not in cs and tau // H == c // H and (u, tau) in part_busy)
         return -adj + rng.random() * 0.5
 
     for e in order:
@@ -206,7 +208,7 @@ def greedy_timetable(inst: Instance, seed: int = 0) -> Timetable:
 
 def _unplace(inst, e, t, r, room_busy, part_busy, res_busy):
     l = inst.lessons[e]
-    for tau in range(t, t + l.duration):
+    for tau in inst.cells(l, t):
         room_busy.discard((r, tau))
         for u in l.participants:
             part_busy.discard((u, tau))
@@ -243,11 +245,10 @@ def windowed_timetable(inst: Instance, time_budget: float = 240.0, window: int =
     params = Params(workers=workers, seed=seed)
     base = StepContext.build(inst, inst, tt, tt, params, gap_protected=set())
     cache = base.__dict__.setdefault("_gamma_cache", {})
-    H = inst.hours
     windows: list[list[str]] = []
     for d in range(1, inst.days + 1):
-        on_day = sorted((e for e in tt if tt[e][0] // H + 1 == d),
-                        key=lambda e: (inst.lessons[e].groups, e))
+        on_day = sorted((e for e in tt if inst.first_day(e, tt[e][0]) == d),
+                        key=lambda e: (inst.lessons[e].groups, inst.lessons[e].lecturers, e))
         windows += [on_day[i:i + window] for i in range(0, len(on_day), window)]
     end = _time.perf_counter() + time_budget
     for i, win in enumerate(windows):
@@ -255,9 +256,9 @@ def windowed_timetable(inst: Instance, time_budget: float = 240.0, window: int =
         if left <= 1:
             break
         om = dict(base.omega)
-        for e in win:
-            d = tt[e][0] // H
-            om[e] = [a for a in base.omega[e] if a[0] // H == d]
+        for e in win:                       # keep the lesson on the same day(s)
+            days = inst.days_of(e, tt[e][0])
+            om[e] = [a for a in base.omega[e] if inst.days_of(e, a[0]) == days]
         c = _replace(base, xk=dict(tt), x0=dict(tt), omega=om)
         c.__dict__["_gamma_cache"] = cache
         sub = SubModel(c, win, protected=False, locks=False, gap_protection=False, assumptions=False)
@@ -267,8 +268,55 @@ def windowed_timetable(inst: Instance, time_budget: float = 240.0, window: int =
     return tt
 
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+ITC_DIR = ROOT_DIR / "experiments" / "itc"       # downloaded ITC 2019 problem XML files
+ITC_SMALL = 400                                  # up to this many lessons: one full x0 solve
+
+
+def itc_sizes(itc_dir: Path = ITC_DIR) -> list[str]:
+    """Experiment size names ``itc-<problem>`` for every ITC 2019 XML on disk."""
+    return sorted(f"itc-{p.stem}" for p in Path(itc_dir).glob("*.xml")) if Path(itc_dir).is_dir() else []
+
+
+def itc_path(size: str, itc_dir: Path = ITC_DIR) -> Path:
+    stem = size[len("itc-"):]
+    if stem == "sample":                         # hand-written sample in examples/
+        return ROOT_DIR / "examples" / "itc_sample.xml"
+    p = Path(itc_dir) / f"{stem}.xml"
+    if not p.exists():
+        raise FileNotFoundError(f"{p} not found - download the ITC 2019 instance into {itc_dir}")
+    return p
+
+
+def load_itc_instance(size: str, cache_dir: Path, time_limit: float = 120.0,
+                      workers: int = 8) -> tuple[Instance, Timetable]:
+    """ITC 2019 instance mapped by cascade.itc (adaptation A) and its x^(0):
+    one full CP-SAT solve for small instances, else greedy + windowed repair.
+    Cached as experiments/instances/<size>.json (seed-independent)."""
+    from cascade.itc import load_itc
+    path = Path(cache_dir) / f"{size}.json"
+    if path.exists():
+        d = io.load_json(path)
+        inst = io.instance_from_dict(d["instance"])
+        return inst, io.timetable_from_dict(inst, d["timetable"])
+    inst = load_itc(itc_path(size))
+    x0 = None
+    if len(inst.lessons) <= ITC_SMALL:
+        x0 = initial_timetable(inst, time_limit, workers)
+    if x0 is None:
+        x0 = windowed_timetable(inst, time_budget=max(time_limit, 240.0), workers=min(workers, 4))
+    if x0 is None or not ev.hard_violations(inst, x0).ok:
+        raise RuntimeError(f"{size}: no feasible x^(0) found for the mapped instance "
+                           f"(see cascade.itc.fidelity_text)")
+    io.save_json({"instance": io.instance_to_dict(inst), "timetable": io.timetable_to_dict(inst, x0)},
+                 path)
+    return inst, x0
+
+
 def load_or_generate(size: str, seed: int, cache_dir: Path, time_limit: float = 60.0,
                      workers: int = 8) -> tuple[Instance, Timetable]:
+    if size.startswith("itc-"):
+        return load_itc_instance(size, cache_dir, max(time_limit, 120.0), workers)
     path = Path(cache_dir) / f"{size}-{seed}.json"
     if path.exists():
         d = io.load_json(path)
@@ -321,6 +369,10 @@ def generate_sequence(inst: Instance, seed: int, steps: Optional[int] = None,
                                   capacity=int(inst.rooms[r].capacity * rng.uniform(0.5, 0.8))))
         else:
             e = rng.choice(lessons)
+            if inst.patterns is not None:            # ITC: one of the lesson's time patterns
+                out.append(Disruption(kind, lesson=e, start=rng.choice(sorted(inst.lessons[e].starts)),
+                                      voluntary=True))
+                continue
             dur = inst.lessons[e].duration
             out.append(Disruption(kind, lesson=e, day=d, hour=rng.randint(1, inst.hours - dur + 1),
                                   voluntary=True))

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 Assignment = tuple[int, str]          # (start slot t, room id)
 Timetable = dict[str, Assignment]      # lesson id -> assignment a(e; x)
@@ -85,6 +85,14 @@ class SoftConstraint:
     home: Optional[str] = None                # room
 
 
+@dataclass(frozen=True)
+class TimePattern:
+    """A time option occupying arbitrary grid slots, e.g. Mon-Wed-Fri 08:00-09:00
+    (used for ITC 2019 instances, whose classes meet on several days)."""
+    cells: tuple[int, ...]
+    label: str = ""
+
+
 @dataclass
 class Instance:
     name: str
@@ -98,6 +106,13 @@ class Instance:
     links: list[tuple[str, str]] = field(default_factory=list)
     soft: dict[str, SoftConstraint] = field(default_factory=dict)
     closed: set[int] = field(default_factory=set)   # slots closed for every lesson
+    # When ``patterns`` is set, a time id t indexes this table (lesson.starts must
+    # list the admissible ids); otherwise t is a start slot and the lesson occupies
+    # the ``duration`` consecutive slots cov(t, duration) of one day.
+    patterns: Optional[list[TimePattern]] = None
+    start_hour: int = 1          # wall-clock label of period 1 (display only)
+    period_minutes: int = 60     # wall-clock length of a period (display only)
+    meta: dict = field(default_factory=dict)
 
     # ------------------------------------------------------------------ time
     @property
@@ -121,6 +136,45 @@ class Instance:
 
     def is_break(self, day: int, hour: int) -> bool:
         return hour in self.breaks.get(day, frozenset())
+
+    # ------------------------------------------------- time options (cells)
+    def time_ids(self) -> range:
+        """All time ids: start slots, or indices into ``patterns``."""
+        return range(len(self.patterns)) if self.patterns is not None else range(self.num_slots)
+
+    def cells(self, lesson: "Lesson | str", t: int) -> Sequence[int]:
+        """Grid slots occupied when ``lesson`` takes time id ``t`` (empty if the
+        lesson cannot fit there)."""
+        if self.patterns is not None:
+            return self.patterns[t].cells
+        l = self.lessons[lesson] if isinstance(lesson, str) else lesson
+        c = self.cov(t, l.duration)
+        return c if c is not None else ()
+
+    def days_of(self, lesson: "Lesson | str", t: int) -> frozenset[int]:
+        H = self.hours
+        return frozenset(c // H + 1 for c in self.cells(lesson, t))
+
+    def first_day(self, lesson: "Lesson | str", t: int) -> int:
+        cs = self.cells(lesson, t)
+        return (min(cs) // self.hours + 1) if cs else 0
+
+    def hours_on_day(self, lesson: "Lesson | str", t: int, day: int) -> int:
+        H = self.hours
+        return sum(1 for c in self.cells(lesson, t) if c // H + 1 == day)
+
+    def min_hours(self, lesson: "Lesson | str") -> int:
+        """Fewest slots any admissible time option of the lesson occupies."""
+        l = self.lessons[lesson] if isinstance(lesson, str) else lesson
+        if self.patterns is None:
+            return l.duration
+        return min((len(self.patterns[t].cells) for t in (l.starts or ())), default=l.duration)
+
+    def time_label(self, t: int) -> str:
+        if self.patterns is not None:
+            return self.patterns[t].label or f"pattern {t}"
+        d, p = self.day_hour(t)
+        return f"day {d}, hour {p}"
 
     # ---------------------------------------------------------- participants
     @property
@@ -157,6 +211,11 @@ class Instance:
             for q in l.resources:
                 if q not in self.resources:
                     raise ValueError(f"lesson {e}: unknown resource {q}")
+            if self.patterns is not None:
+                if not l.starts:
+                    raise ValueError(f"lesson {e}: pattern instances need explicit starts")
+                if any(not 0 <= t < len(self.patterns) for t in l.starts):
+                    raise ValueError(f"lesson {e}: unknown pattern id")
         for a, b in self.links:
             if a not in self.lessons or b not in self.lessons:
                 raise ValueError(f"link ({a},{b}) references unknown lesson")

@@ -149,7 +149,7 @@ class SubModel:
             l = inst.lessons[e]
             parts, ress = l.participants, l.resources
             for t, r, v in vs:
-                for tau in range(t, t + l.duration):
+                for tau in inst.cells(l, t):
                     room_cells[(r, tau)].append(v)
                     for u in parts:
                         part_cells[(u, tau)].append(v)
@@ -158,7 +158,7 @@ class SubModel:
         for e in self.const_lessons:
             l = inst.lessons[e]
             t, r = ctx.xk[e]
-            for tau in range(t, t + l.duration):
+            for tau in inst.cells(l, t):
                 room_c[(r, tau)] += 1
                 for u in l.participants:
                     self.part_c[(u, tau)] += 1
@@ -237,7 +237,7 @@ class SubModel:
         # ------------------------------------------------------- gaps (6)-(9)
         days_of: dict[str, set[int]] = defaultdict(set)
         for e, vs in self.x.items():
-            ds = {t // H + 1 for t, _, _ in vs}
+            ds = set().union(*(inst.days_of(e, t) for t, _, _ in vs)) if vs else set()
             for u in inst.lessons[e].participants:
                 days_of[u] |= ds
         const_occ: dict[str, set[int]] = defaultdict(set)
@@ -341,12 +341,10 @@ class SubModel:
             un = s.unwanted
             c0 = 0
             for e in const:
-                t = ctx.xk[e][0]
-                c0 += sum(1 for tau in range(t, t + inst.lessons[e].duration) if tau in un)
+                c0 += sum(1 for tau in inst.cells(e, ctx.xk[e][0]) if tau in un)
             for e in var:
-                d = inst.lessons[e].duration
                 for t, _, v in self.x[e]:
-                    c = sum(1 for tau in range(t, t + d) if tau in un)
+                    c = sum(1 for tau in inst.cells(e, t) if tau in un)
                     if c:
                         idx.append(v)
                         coef.append(c)
@@ -357,14 +355,13 @@ class SubModel:
                 idx.extend(v for _, r, v in self.x[e] if r != s.home)
             return Lin(idx, None, c0)
         # load: aux >= hours - cap, aux >= 0 (bounded from below only -> exact)
-        H = inst.hours
-        c0 = sum(inst.lessons[e].duration for e in const if ctx.xk[e][0] // H + 1 == s.day)
+        c0 = sum(inst.hours_on_day(e, ctx.xk[e][0], s.day) for e in const)
         for e in var:
-            d = inst.lessons[e].duration
             for t, _, v in self.x[e]:
-                if t // H + 1 == s.day:
+                h = inst.hours_on_day(e, t, s.day)
+                if h:
                     idx.append(v)
-                    coef.append(d)
+                    coef.append(h)
         aux = self.m.new_int_var(0, inst.hours * len(gam) + 1, "").index
         self._ge(Lin([aux]) - Lin(idx, coef, c0), -s.cap)
         return Lin([aux])

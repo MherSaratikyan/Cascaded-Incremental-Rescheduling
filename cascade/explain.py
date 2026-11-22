@@ -62,12 +62,13 @@ def counting_proof(ctx: StepContext) -> Optional[str]:
         for u in l.participants:
             lessons_of.setdefault(u, []).append(e)
     for u, es in sorted(lessons_of.items()):
-        need = sum(inst.lessons[e].duration for e in es)
-        avail: set[int] = set()
+        need, avail = 0, set()
         for e in es:
-            d = inst.lessons[e].duration
-            for t in {t for t, _ in ctx.omega[e]}:
-                avail.update(range(t, t + d))
+            starts = {t for t, _ in ctx.omega[e]}
+            # fewest cells any admissible option needs (keeps the bound a proof)
+            need += min((len(inst.cells(e, t)) for t in starts), default=0)
+            for t in starts:
+                avail.update(inst.cells(e, t))
         if need > len(avail):
             return f"{u} needs {need} hours but its lessons can only use {len(avail)}"
     return None

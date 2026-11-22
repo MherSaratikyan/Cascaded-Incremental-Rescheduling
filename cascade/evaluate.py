@@ -28,13 +28,12 @@ def omega(inst: Instance, e: str, start: Optional[int] = None,
     for u in l.participants:
         blocked |= inst.participants[u].unavailable
     out: list[Assignment] = []
-    for t in range(inst.num_slots):
+    ids = inst.time_ids() if l.starts is None else sorted(l.starts)
+    for t in ids:
         if start is not None and t != start:
             continue
-        if l.starts is not None and t not in l.starts:
-            continue
-        c = inst.cov(t, l.duration)
-        if c is None or any(tau in blocked for tau in c):
+        c = inst.cells(l, t)
+        if not c or any(tau in blocked for tau in c):
             continue
         for r in rooms:
             un = inst.rooms[r].unavailable
@@ -84,7 +83,7 @@ def hard_violations(inst: Instance, tt: Timetable,
             rep.units += 1
             rep.lessons.add(e)
             rep.details.append(f"{e} at inadmissible {a}")
-        c = inst.cov(a[0], l.duration) or range(a[0], a[0] + 1)
+        c = inst.cells(l, a[0]) or range(a[0], a[0] + 1)
         for tau in c:
             room_cells[(a[1], tau)].append(e)
             for u in l.participants:
@@ -121,7 +120,7 @@ def gamma(inst: Instance, s: SoftConstraint) -> list[str]:
 
 def soft_den(inst: Instance, s: SoftConstraint) -> int:
     if s.kind == "pref":
-        return max(1, sum(inst.lessons[e].duration for e in gamma(inst, s)))
+        return max(1, sum(inst.min_hours(e) for e in gamma(inst, s)))
     if s.kind == "load":
         return max(1, inst.hours - s.cap)
     return max(1, len(gamma(inst, s)))
@@ -133,14 +132,10 @@ def soft_num(inst: Instance, tt: Timetable, s: SoftConstraint) -> int:
         n = 0
         for e in gamma(inst, s):
             if e in tt:
-                t = tt[e][0]
-                n += sum(1 for tau in range(t, t + inst.lessons[e].duration) if tau in s.unwanted)
+                n += sum(1 for tau in inst.cells(e, tt[e][0]) if tau in s.unwanted)
         return n
     if s.kind == "load":
-        hours = 0
-        for e in gamma(inst, s):
-            if e in tt and inst.day_hour(tt[e][0])[0] == s.day:
-                hours += inst.lessons[e].duration
+        hours = sum(inst.hours_on_day(e, tt[e][0], s.day) for e in gamma(inst, s) if e in tt)
         return max(0, hours - s.cap)
     return sum(1 for e in gamma(inst, s) if e in tt and tt[e][1] != s.home)
 
@@ -171,10 +166,10 @@ def gaps(inst: Instance, tt: Timetable, participants: Optional[Iterable[str]] = 
     for e, l in inst.lessons.items():
         if e not in tt:
             continue
-        t = tt[e][0]
+        c = inst.cells(l, tt[e][0])
         for u in l.participants:
             if u in occ:
-                occ[u].update(range(t, t + l.duration))
+                occ[u].update(c)
     out: dict[tuple[str, int], int] = {}
     H = inst.hours
     for u in us:

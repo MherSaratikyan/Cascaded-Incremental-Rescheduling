@@ -1,4 +1,5 @@
-"""Heavy-workload performance run: scenarios H1-H9 on sizes S, M, L, XL.
+"""Heavy-workload performance run: scenarios H1-H9 on sizes S, M, L, XL and on
+every ITC 2019 instance downloaded into experiments/itc (as ``itc-<problem>``).
 
 Every request runs in a fresh process (exact peak memory, memory guard).
 Single-request scenarios also get a reference run "REF" = B4 with a long
@@ -25,7 +26,7 @@ if str(ROOT) not in sys.path:
 from cascade.baselines import METHODS  # noqa: E402
 from cascade.params import Params  # noqa: E402
 from experiments import scenarios as sc  # noqa: E402
-from experiments.generator import load_or_generate, sample_regulation  # noqa: E402
+from experiments.generator import itc_sizes, load_or_generate, sample_regulation  # noqa: E402
 from experiments.measure import ALL_METRICS, State, advance_state, run_isolated  # noqa: E402
 from experiments.runner import _done_keys, open_csv  # noqa: E402
 
@@ -57,7 +58,9 @@ def run_sequence(task: dict) -> list[dict]:
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--sizes", nargs="+", default=["S", "M", "L", "XL"])
+    ap.add_argument("--sizes", nargs="+", default=["S", "M", "L", "XL"] + itc_sizes(),
+                    help="synthetic sizes and itc-<problem> names (default: S M L XL + every "
+                         "ITC 2019 XML in experiments/itc)")
     ap.add_argument("--scenarios", nargs="+", default=list(sc.ALL))
     ap.add_argument("--methods", nargs="+", default=list(METHODS))
     ap.add_argument("--seeds", type=int, default=None,

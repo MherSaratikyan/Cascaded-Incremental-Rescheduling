@@ -23,6 +23,7 @@ class Disruption:
     capacities: Optional[dict[str, int]] = None      # capacity_change of several rooms at once
     day: Optional[int] = None
     hour: Optional[int] = None
+    start: Optional[int] = None          # raw time id (pattern instances, e.g. ITC 2019)
     voluntary: bool = True
     note: str = ""
 
@@ -69,7 +70,8 @@ def apply(inst: Instance, d: Disruption) -> tuple[Instance, Optional[MoveRequest
         for r, cap in (d.capacities or {}).items():
             new.rooms[r].capacity = cap
     elif d.kind == "move_request":
-        return new, MoveRequest(d.lesson, inst.slot(d.day, d.hour), d.room, d.voluntary)
+        t = d.start if d.start is not None else inst.slot(d.day, d.hour)
+        return new, MoveRequest(d.lesson, t, d.room, d.voluntary)
     else:
         raise ValueError(d.kind)
     return new, None

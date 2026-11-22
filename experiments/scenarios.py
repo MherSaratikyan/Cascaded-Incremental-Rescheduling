@@ -47,7 +47,7 @@ def _hours_by(inst: Instance, x0: Timetable, key) -> Counter:
     c: Counter = Counter()
     for e, (t, r) in x0.items():
         for k in key(e, r):
-            c[k] += inst.lessons[e].duration
+            c[k] += len(inst.cells(e, t))
     return c
 
 
@@ -86,7 +86,8 @@ def build(sid: str, inst: Instance, x0: Timetable, seed: int,
             per_day = Counter()
             for e, (t, r) in x0.items():
                 if lec in inst.lessons[e].lecturers:
-                    per_day[t // H + 1] += inst.lessons[e].duration
+                    for d in inst.days_of(e, t):
+                        per_day[d] += inst.hours_on_day(e, t, d)
             days = sorted(d for d, _ in sorted(per_day.items(), key=lambda kv: (-kv[1], kv[0]))[:2])
             dis = Disruption("participant_unavailable", participant=lec,
                              slots=[(d, p) for d in days for p in range(1, H + 1)],
@@ -118,6 +119,11 @@ def build(sid: str, inst: Instance, x0: Timetable, seed: int,
         dis = []
         for _ in range(10):
             e = rng.choice(lessons)
+            if inst.patterns is not None:        # ITC: request another of its time patterns
+                opts = sorted(inst.lessons[e].starts - {x0[e][0]}) or sorted(inst.lessons[e].starts)
+                dis.append(Disruption("move_request", lesson=e, start=rng.choice(opts),
+                                      voluntary=True))
+                continue
             dur = inst.lessons[e].duration
             dis.append(Disruption("move_request", lesson=e, day=rng.randint(1, D),
                                   hour=rng.randint(1, H - dur + 1), voluntary=True))
@@ -127,7 +133,7 @@ def build(sid: str, inst: Instance, x0: Timetable, seed: int,
     if sid == "H8":
         hours = _hours_by(inst, x0, lambda e, r: inst.lessons[e].groups)
         cands = [(h, g) for g, h in hours.items()
-                 if h >= 3 and max(inst.lessons[e].duration for e in inst.lessons
+                 if h >= 3 and max(inst.min_hours(e) for e in inst.lessons
                                    if g in inst.lessons[e].groups) <= min(H, h - 1)]
         h, g = max(cands) if cands else max((h, g) for g, h in hours.items())
         # keep exactly h-1 hours available, in blocks from hour 1 of each day
@@ -145,10 +151,12 @@ def build(sid: str, inst: Instance, x0: Timetable, seed: int,
                              notes={"group": g, "needs": h, "available": h - 1})
     if sid == "H9":
         # busiest (room, day) whose closure keeps every lesson possible and hits no full lock
-        locked = {(x0[e][1], x0[e][0] // H + 1) for e, lk in locks.items() if lk == "A"}
+        locked = {(x0[e][1], d) for e, lk in locks.items() if lk == "A"
+                  for d in inst.days_of(e, x0[e][0])}
         load: Counter = Counter()
         for e, (t, r) in x0.items():
-            load[(r, t // H + 1)] += inst.lessons[e].duration
+            for d in inst.days_of(e, t):
+                load[(r, d)] += inst.hours_on_day(e, t, d)
         for (room, day), _ in sorted(load.items(), key=lambda kv: (-kv[1], kv[0])):
             if (room, day) in locked:
                 continue

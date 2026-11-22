@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .disruptions import Disruption
-from .model import Instance, Lesson, Participant, Resource, Room, SoftConstraint, Timetable
+from .model import (Instance, Lesson, Participant, Resource, Room, SoftConstraint, TimePattern,
+                    Timetable)
 from .params import Params
 
 
@@ -37,16 +38,25 @@ def instance_from_dict(d: dict[str, Any]) -> Instance:
                                          _slots_in(D, H, p.get("unavailable")),
                                          float(p.get("weight", 1.0)))
     resources = {q["id"]: Resource(q["id"], int(q["capacity"])) for q in d.get("resources", [])}
+    patterns = None
+    if d.get("patterns") is not None:
+        patterns = [TimePattern(tuple(sorted(_slots_in(D, H, p["cells"]))), p.get("label", ""))
+                    for p in d["patterns"]]
     lessons = {}
     for l in d["lessons"]:
         starts = l.get("starts")
+        if starts is None:
+            st = None
+        elif patterns is not None:
+            st = frozenset(int(x) for x in starts)          # pattern ids
+        else:
+            st = frozenset(_slots_in(D, H, starts))         # (day, hour) pairs
         lessons[l["id"]] = Lesson(
             id=l["id"], duration=int(l.get("duration", 1)),
             lecturers=tuple(l.get("lecturers", [])), groups=tuple(l.get("groups", [])),
             course=l.get("course"),
             rooms=tuple(l["rooms"]) if l.get("rooms") is not None else None,
-            starts=frozenset(_slots_in(D, H, starts)) if starts is not None else None,
-            resources=tuple(l.get("resources", [])))
+            starts=st, resources=tuple(l.get("resources", [])))
     soft = {}
     for s in d.get("soft", []):
         soft[s["id"]] = SoftConstraint(
@@ -56,7 +66,9 @@ def instance_from_dict(d: dict[str, Any]) -> Instance:
     inst = Instance(name=d.get("name", "instance"), days=D, hours=H, rooms=rooms,
                     participants=parts, lessons=lessons, breaks=breaks, resources=resources,
                     links=[tuple(x) for x in d.get("links", [])], soft=soft,
-                    closed=_slots_in(D, H, d.get("closed")))
+                    closed=_slots_in(D, H, d.get("closed")), patterns=patterns,
+                    start_hour=int(d.get("start_hour", 1)),
+                    period_minutes=int(d.get("period_minutes", 60)), meta=d.get("meta", {}))
     inst.validate()
     return inst
 
@@ -87,7 +99,8 @@ def instance_to_dict(inst: Instance) -> dict[str, Any]:
         if l.rooms is not None:
             o["rooms"] = list(l.rooms)
         if l.starts is not None:
-            o["starts"] = _slots_out(inst, l.starts)
+            o["starts"] = (sorted(l.starts) if inst.patterns is not None
+                           else _slots_out(inst, l.starts))
         if l.resources:
             o["resources"] = list(l.resources)
         lessons.append(o)
@@ -120,14 +133,25 @@ def instance_to_dict(inst: Instance) -> dict[str, Any]:
         out["soft"] = soft
     if inst.closed:
         out["closed"] = _slots_out(inst, inst.closed)
+    if inst.patterns is not None:
+        out["patterns"] = [{"cells": _slots_out(inst, p.cells), "label": p.label}
+                           for p in inst.patterns]
+        out["start_hour"] = inst.start_hour
+        out["period_minutes"] = inst.period_minutes
+    if inst.meta:
+        out["meta"] = inst.meta
     return out
 
 
 def timetable_from_dict(inst: Instance, d: dict[str, Any]) -> Timetable:
-    return {e: (inst.slot(int(v[0]), int(v[1])), v[2]) for e, v in d.items()}
+    """[day, hour, room] for slot instances, [time id, room] for pattern instances."""
+    return {e: ((int(v[0]), v[1]) if len(v) == 2 else (inst.slot(int(v[0]), int(v[1])), v[2]))
+            for e, v in d.items()}
 
 
 def timetable_to_dict(inst: Instance, tt: Timetable) -> dict[str, list]:
+    if inst.patterns is not None:
+        return {e: [t, r] for e, (t, r) in sorted(tt.items())}
     return {e: [*inst.day_hour(t), r] for e, (t, r) in sorted(tt.items())}
 
 

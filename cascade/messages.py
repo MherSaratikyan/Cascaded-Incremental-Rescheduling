@@ -15,6 +15,9 @@ def _ord_hy(n: int) -> str:
 
 
 def slot_text(inst: Instance, a: Assignment, lang: str) -> str:
+    if inst.patterns is not None:          # multi-day pattern, e.g. "MWF 08:00-09:00"
+        return (f"{inst.time_label(a[0])}, {a[1]} լսարան" if lang == "hy"
+                else f"{inst.time_label(a[0])}, room {a[1]}")
     d, p = inst.day_hour(a[0])
     if lang == "hy":
         return f"{_ord_hy(d)} օր, {_ord_hy(p)} ժամ, {a[1]} լսարան"

@@ -78,7 +78,7 @@ class _State:
         l = self.inst.lessons[e]
         t, r = a
         d = 0
-        for tau in range(t, t + l.duration):
+        for tau in self.inst.cells(l, t):
             d += self._bump(self.room, (r, tau), sign, 1)
             for u in l.participants:
                 d += self._bump(self.part, (u, tau), sign, 1)
@@ -126,7 +126,7 @@ class _State:
         self.hard += dh + self._hard_local(e) - before
         for s in self.soft_of[e]:
             self.num[s] = ev.soft_num(inst, self.tt, inst.soft[s])
-        days = {old[0] // inst.hours + 1, new[0] // inst.hours + 1}
+        days = inst.days_of(e, old[0]) | inst.days_of(e, new[0])
         for u in inst.lessons[e].participants:
             for d in days:
                 self.gap[(u, d)] = self._day_gaps(u, d)
@@ -191,10 +191,9 @@ def b6_local_search(ctx: StepContext) -> Result:
         a = rng.choice(opts[e])
         undo = [(e, s.move(e, a))]
         if rng.random() < 0.5:                 # ejection: move one lesson now clashing in the room
-            l = inst.lessons[e]
+            mine = set(inst.cells(e, a[0]))
             clash = [j for j in movable if j != e and s.tt[j][1] == a[1]
-                     and set(range(s.tt[j][0], s.tt[j][0] + inst.lessons[j].duration))
-                     & set(range(a[0], a[0] + l.duration))]
+                     and mine & set(inst.cells(j, s.tt[j][0]))]
             if clash:
                 j = rng.choice(clash)
                 undo.append((j, s.move(j, rng.choice(opts[j]))))

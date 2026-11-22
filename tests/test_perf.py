@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from experiments.generator import ITC_DIR, itc_sizes
 from experiments.perf import FIELDS, REF, run_sequence
 
 pytestmark = pytest.mark.perf
@@ -26,7 +27,10 @@ pytestmark = pytest.mark.perf
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "experiments" / "results"
 TIME_LIMIT, EXPLAIN, REF_TIME, GUARD_MB, MARGIN = 30.0, 10.0, 120.0, 3072.0, 15.0
-CASES = [(size, sid) for size in ("S", "M") for sid in ("H1", "H5", "H7", "H9")]
+# real ITC 2019 instances, when downloaded into experiments/itc: the two smallest files
+ITC = sorted(itc_sizes(), key=lambda s: (ITC_DIR / f"{s[4:]}.xml").stat().st_size)[:2]
+CASES = ([(size, sid) for size in ("S", "M") for sid in ("H1", "H5", "H7", "H9")]
+         + [(size, sid) for size in ITC for sid in ("H1", "H5", "H9")])
 SINGLE_CASES = [c for c in CASES if c[1] != "H5"]
 _cache: dict = {}
 
@@ -97,16 +101,16 @@ def test_proposed_method_never_breaks_regulation(size, sid):
             assert int(r["mcs_verified"]) == int(r["mcs_count"]), r
 
 
-@pytest.mark.parametrize("size", ["S", "M"])
+@pytest.mark.parametrize("size", ["S", "M"] + ITC)
 def test_feasible_scenario_measures_distance_to_optimum(size):
     """H9 (one room closed for one day, gap protection off) is repairable: the
-    reference proves the optimum P_k* (required on S; on M only if it finishes
-    within its limit), B7 solves the request without regulation violations, and
-    its P_k / P_k* (>= 1) is recorded for the report."""
+    reference proves the optimum P_k* (required on S; on M and ITC instances
+    only if it finishes within its limit), B7 solves the request without
+    regulation violations, and its P_k / P_k* (>= 1) is recorded for the report."""
     ref = rows_for(size, "H9", REF)[0]
     b7 = rows_for(size, "H9", "B7")[0]
-    if size == "M" and not (ref["outcome"] == "solved" and ref.get("pstar_proven")):
-        pytest.skip(f"M reference not proven within {REF_TIME:g} s: {ref['outcome']}")
+    if size != "S" and not (ref["outcome"] == "solved" and ref.get("pstar_proven")):
+        pytest.skip(f"{size} reference not proven within {REF_TIME:g} s: {ref['outcome']}")
     assert ref["outcome"] == "solved" and ref.get("pstar_proven"), ref["outcome"]
     assert b7["outcome"] == "solved", b7["outcome"]
     star, pk = float(ref["pstar"]), float(b7["P_k"])

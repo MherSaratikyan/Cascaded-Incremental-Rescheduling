@@ -84,8 +84,8 @@ def disruption_to_people(ctx: StepContext, tt: Timetable, changed: list[str]) ->
     for e in changed:
         (t, r), (tk, rk) = tt[e], ctx.xk[e]
         if t != tk:
-            hours_moved += inst.lessons[e].duration
-            day_changes += (t // H) != (tk // H)
+            hours_moved += len(inst.cells(e, tk))
+            day_changes += inst.days_of(e, t) != inst.days_of(e, tk)
         else:
             room_only += 1
     return {"lecturers_affected": len({l for e in changed for l in inst.lessons[e].lecturers}),

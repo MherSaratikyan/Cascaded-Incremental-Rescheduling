@@ -27,7 +27,7 @@ class DependencyGraph:
         self.occ: dict[tuple, set[str]] = defaultdict(set)
         for e, (t, r) in ctx.xk.items():
             l = inst.lessons[e]
-            for tau in range(t, t + l.duration):
+            for tau in inst.cells(l, t):
                 self.occ[("room", r, tau)].add(e)
                 for u in l.participants:
                     self.occ[("part", u, tau)].add(e)
@@ -60,7 +60,7 @@ class DependencyGraph:
         counts: dict[str, int] = defaultdict(int)
         for t, r in om:
             blockers: set[str] = set()
-            for tau in range(t, t + l.duration):
+            for tau in inst.cells(l, t):
                 blockers |= self.occ.get(("room", r, tau), set())
                 for u in l.participants:
                     blockers |= self.occ.get(("part", u, tau), set())
@@ -85,12 +85,13 @@ class DependencyGraph:
             seen_t: set[int] = set()
             for t, r in self.ctx.omega[e]:
                 ri = self.res_index[("room", r)]
-                for tau in range(t, t + l.duration):
+                cs = inst.cells(l, t)
+                for tau in cs:
                     bits |= 1 << (ri * T + tau)
                 if t not in seen_t:
                     seen_t.add(t)
                     for pi in parts:
-                        for tau in range(t, t + l.duration):
+                        for tau in cs:
                             bits |= 1 << (pi * T + tau)
             self._theta[e] = bits
             self._theta_n[e] = bits.bit_count()

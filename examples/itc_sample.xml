@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Small hand-written instance in the ITC 2019 problem format
+     (https://www.itc2019.org/format), used to test the loader without the
+     registered competition data. 5-minute slots, 7 days, 13 weeks. -->
+<problem name="sample-itc" nrDays="7" nrWeeks="13" slotsPerDay="288">
+	<optimization time="2" room="1" distribution="1" student="2"/>
+	<rooms>
+		<room id="1" capacity="50"/>
+		<room id="2" capacity="100">
+			<travel room="1" value="2"/>
+		</room>
+		<room id="3" capacity="80">
+			<travel room="2" value="3"/>
+			<!-- Mon+Tue 8:30-10:30 all weeks: kept -->
+			<unavailable days="1100000" start="102" length="24" weeks="1111111111111"/>
+			<!-- Fri 12:00-24:00 odd weeks only: dropped (partial weeks) -->
+			<unavailable days="0000100" start="144" length="144" weeks="1010101010101"/>
+		</room>
+	</rooms>
+	<courses>
+		<course id="1">
+			<config id="1">
+				<subpart id="1">
+					<!-- MWF 8:00-8:50 or TTh 9:00-10:15 -->
+					<class id="1" limit="40">
+						<room id="1" penalty="0"/>
+						<room id="2" penalty="10"/>
+						<time days="1010100" start="96" length="10" weeks="1111111111111" penalty="0"/>
+						<time days="0101000" start="108" length="15" weeks="1111111111111" penalty="2"/>
+					</class>
+					<class id="2" limit="40">
+						<room id="1" penalty="0"/>
+						<room id="2" penalty="0"/>
+						<time days="1010100" start="96" length="10" weeks="1111111111111" penalty="0"/>
+						<time days="1010100" start="108" length="10" weeks="1111111111111" penalty="0"/>
+						<time days="0101000" start="120" length="15" weeks="1111111111111" penalty="0"/>
+					</class>
+				</subpart>
+				<subpart id="2">
+					<!-- Recitation, child of class 1, even weeks only -->
+					<class id="3" parent="1" limit="25">
+						<room id="1" penalty="0"/>
+						<room id="3" penalty="0"/>
+						<time days="0100000" start="96" length="12" weeks="0101010101010" penalty="0"/>
+						<time days="0001000" start="96" length="12" weeks="0101010101010" penalty="0"/>
+						<time days="0000100" start="132" length="12" weeks="1111111111111" penalty="5"/>
+					</class>
+					<!-- no room needed -->
+					<class id="4" parent="2" limit="25" room="false">
+						<time days="0100000" start="132" length="12" weeks="1111111111111" penalty="0"/>
+						<time days="0001000" start="132" length="12" weeks="1111111111111" penalty="0"/>
+					</class>
+				</subpart>
+			</config>
+		</course>
+		<course id="2">
+			<config id="1">
+				<subpart id="3">
+					<class id="5" limit="60">
+						<room id="2" penalty="0"/>
+						<room id="3" penalty="0"/>
+						<time days="1000000" start="96" length="24" weeks="1111111111111" penalty="0"/>
+						<time days="0010000" start="96" length="24" weeks="1111111111111" penalty="0"/>
+						<time days="0000100" start="96" length="24" weeks="1111111111111" penalty="0"/>
+					</class>
+					<class id="6" limit="60">
+						<room id="2" penalty="0"/>
+						<room id="3" penalty="0"/>
+						<time days="1000000" start="132" length="24" weeks="1111111111111" penalty="0"/>
+						<time days="0010000" start="132" length="24" weeks="1111111111111" penalty="0"/>
+						<time days="0000100" start="132" length="24" weeks="1111111111111" penalty="3"/>
+					</class>
+				</subpart>
+			</config>
+		</course>
+	</courses>
+	<distributions>
+		<!-- instructor teaching classes 1 and 5 -->
+		<distribution type="SameAttendees" required="true">
+			<class id="1"/>
+			<class id="5"/>
+		</distribution>
+		<!-- course structure: parent/child cannot overlap -->
+		<distribution type="SameAttendees" required="true">
+			<class id="1"/>
+			<class id="3"/>
+		</distribution>
+		<distribution type="SameAttendees" required="true">
+			<class id="2"/>
+			<class id="4"/>
+		</distribution>
+		<distribution type="NotOverlap" required="true">
+			<class id="5"/>
+			<class id="6"/>
+		</distribution>
+		<distribution type="Precedence" required="true">
+			<class id="1"/>
+			<class id="3"/>
+		</distribution>
+		<distribution type="SameRoom" penalty="2">
+			<class id="5"/>
+			<class id="6"/>
+		</distribution>
+		<distribution type="MaxDays(2)" required="true">
+			<class id="5"/>
+			<class id="6"/>
+		</distribution>
+	</distributions>
+	<students>
+		<student id="1"><course id="1"/><course id="2"/></student>
+		<student id="2"><course id="1"/></student>
+	</students>
+</problem>
