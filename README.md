@@ -132,8 +132,15 @@ paper's model. The mapping is an adaptation, not a 1:1 load:
 
 Every dropped element is counted in a **fidelity report**, printed by `cascade.itc.fidelity_text(inst)`.
 
-The official instances need a registered login on itc2019.org. Instead,
-`experiments/itc_generator.py` writes **ITC 2019-style synthetic instances** in the same XML format. They have
+The GitHub Actions workflow downloads three official ITC 2019 test instances
+(`lums-sum17`, `wbg-fal10`, `pu-cs-fal07`) from a pinned commit of the competition
+organization's public solver repository and verifies their SHA-256 hashes.
+`python -m experiments.itc_data --synthetic s m l` downloads these files,
+generates the ITC-style cases and writes a provenance/fidelity manifest. See
+[ITC benchmark inputs](experiments/itc/README.md) for the source, additional XMLs
+and details of the workflow's coverage.
+
+`experiments/itc_generator.py` also writes **ITC 2019-style synthetic instances** in the same XML format. They have
 the competition's structure: MWF/TTh/lab patterns, odd and even weeks, courses with configurations, subparts and
 parent/child classes, travel times, students, and all distribution types, both required and soft. They are not
 the real competition instances.
@@ -149,6 +156,16 @@ That writes `experiments\itc\synth-s.xml`, `synth-m.xml` and `synth-l.xml`, with
 - the x^(0) timetable is solved once and cached in `experiments\instances`.
 
 Real ITC files can be dropped into the same folder.
+
+In GitHub Actions, select **Rescheduling benchmarks → Run workflow → full**.
+The full workflow runs H1-H9 on S/M/L/XL and H1/H5/H9 on the official,
+generated and additional ITC XMLs. It shares starting timetables between
+jobs, builds the job matrix from the discovered datasets, and combines all
+results in the `full-results` artifact. Preparation/scenario limitations are
+listed in `benchmark-metadata/benchmark-plan.json`; these are not proofs of
+infeasibility. The smoke workflow also downloads ITC inputs before the perf
+tests select their two smallest XMLs, so its runtime includes those extra cases.
+
 - **CP-SAT settings.** `find_big_linear_overlap` is off (on these models this presolve step
   takes most of the run time). Models with more than 5000 x-variables skip probing and
   symmetry detection. Models with fewer than 3000 use a single worker.

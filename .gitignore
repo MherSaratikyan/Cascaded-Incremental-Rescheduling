@@ -5,5 +5,13 @@ __pycache__/
 .pytest_cache/
 *.prof
 experiments/instances/
-experiments/itc/
+experiments/itc/*
+!experiments/itc/*.xml
+!experiments/itc/README.md
+!experiments/itc/UPSTREAM_LICENSE.txt
+experiments/itc/synth-*.xml
+experiments/itc/lums-sum17.xml
+experiments/itc/wbg-fal10.xml
+experiments/itc/pu-cs-fal07.xml
 experiments/results/
+benchmark-metadata/

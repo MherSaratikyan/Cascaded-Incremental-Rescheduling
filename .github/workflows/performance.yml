@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: "Start with smoke; full runs synthetic sizes S/M/L/XL and H1-H9"
+        description: "Smoke tests or full benchmarks, including official and generated ITC data"
         type: choice
         options:
           - smoke
@@ -32,7 +32,7 @@ jobs:
   smoke:
     if: inputs.suite == 'smoke'
     runs-on: windows-2025
-    timeout-minutes: 120
+    timeout-minutes: 210
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -67,8 +67,14 @@ jobs:
             --junitxml=experiments/results/unit-tests.xml \
             2>&1 | tee benchmark-metadata/unit-tests.log
 
+      - name: Fetch official ITC cases and generate ITC-style smoke inputs
+        timeout-minutes: 45
+        run: |
+          python -m experiments.itc_data --synthetic s m \
+            2>&1 | tee benchmark-metadata/itc-data.log
+
       - name: Performance smoke tests
-        timeout-minutes: 90
+        timeout-minutes: 120
         run: |
           python -m pytest -m perf -v --durations=0 \
             --junitxml=experiments/results/performance-tests.xml \
@@ -82,6 +88,7 @@ jobs:
           path: |
             experiments/results/
             experiments/instances/
+            experiments/itc/
             benchmark-metadata/
           retention-days: 7
 
@@ -89,6 +96,9 @@ jobs:
     if: inputs.suite == 'full'
     runs-on: windows-2025
     timeout-minutes: 330
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      expected_csvs: ${{ steps.plan.outputs.expected_csvs }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -98,26 +108,77 @@ jobs:
       - name: Install pinned dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Generate one shared set of starting timetables
-        timeout-minutes: 300
+      - name: Fetch official ITC cases and generate ITC-style full inputs
+        timeout-minutes: 90
+        run: |
+          mkdir -p benchmark-metadata
+          python -m experiments.itc_data --synthetic s m l \
+            2>&1 | tee benchmark-metadata/itc-data.log
+
+      - name: Prepare shared timetables and build the benchmark matrix
+        id: plan
+        timeout-minutes: 210
         run: |
           mkdir -p benchmark-metadata
           python -m pip freeze > benchmark-metadata/prepare-dependencies.txt
           python - <<'PY' 2>&1 | tee benchmark-metadata/prepare.log
+          import json, os, re
           from pathlib import Path
-          from experiments.generator import load_or_generate
+          from experiments.generator import itc_sizes, load_or_generate, sample_regulation
+          from experiments.scenarios import ALL, build
           cache = Path("experiments/instances")
+          jobs, omitted = [], []
           for size, count in (("S", 3), ("M", 3), ("L", 1), ("XL", 1)):
               for seed in range(1, count + 1):
                   inst, _ = load_or_generate(size, seed, cache, workers=2)
                   print(f"Prepared {size}-{seed}: {len(inst.lessons)} lessons", flush=True)
+              jobs.extend(dict(size=size, scenario=sid) for sid in ALL)
+          manifest = json.loads(Path("benchmark-metadata/itc-manifest.json").read_text(encoding="utf-8"))
+          origins = {d["size"]: d["kind"] for d in manifest["datasets"]}
+          ready_kinds = set()
+          for size in itc_sizes():
+              if not re.fullmatch(r"itc-[A-Za-z0-9][A-Za-z0-9._-]*", size):
+                  raise ValueError(f"Unsupported XML filename: {size}")
+              try:
+                  inst, x0 = load_or_generate(size, 1, cache, workers=2)
+              except RuntimeError as exc:
+                  omitted.append(dict(size=size, stage="initial_timetable", reason=str(exc)))
+                  print(f"ITC preparation limitation: {size}: {exc}", flush=True)
+                  continue
+              ready_kinds.add(origins[size])
+              _, locks = sample_regulation(inst, 1, 0.2, 0.1)
+              for sid in ("H1", "H5", "H9"):
+                  try:
+                      build(sid, inst, x0, 1, locks)
+                  except RuntimeError as exc:
+                      omitted.append(dict(size=size, scenario=sid, stage="scenario", reason=str(exc)))
+                      print(f"ITC scenario limitation: {size}/{sid}: {exc}", flush=True)
+                      continue
+                  jobs.append(dict(size=size, scenario=sid))
+              print(f"Prepared {size}: {len(inst.lessons)} lessons", flush=True)
+          plan = dict(jobs=jobs, omitted=omitted)
+          Path("benchmark-metadata/benchmark-plan.json").write_text(
+              json.dumps(plan, indent=2), encoding="utf-8")
+          required = {"official_itc2019_test_instance", "synthetic_itc2019_style"}
+          if not required <= ready_kinds:
+              raise RuntimeError(f"ITC coverage incomplete: prepared dataset kinds are {sorted(ready_kinds)}")
+          if len(jobs) > 256:
+              raise RuntimeError(f"{len(jobs)} jobs exceed GitHub's 256-job matrix limit")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("matrix=" + json.dumps(dict(include=jobs), separators=(",", ":")) + "\n")
+              output.write(f"expected_csvs={len(jobs)}\n")
+          print(f"Planned {len(jobs)} benchmark jobs; {len(omitted)} recorded limitations", flush=True)
           PY
 
-      - name: Save shared starting timetables
+      - name: Save shared timetables, XML inputs and dataset manifests
         uses: actions/upload-artifact@v7
         with:
-          name: benchmark-instances
-          path: experiments/instances/
+          name: benchmark-inputs
+          path: |
+            experiments/instances/
+            experiments/itc/
+            benchmark-metadata/itc-manifest.json
+            benchmark-metadata/benchmark-plan.json
           if-no-files-found: error
           retention-days: 7
 
@@ -137,9 +198,7 @@ jobs:
     strategy:
       fail-fast: false
       max-parallel: 4
-      matrix:
-        size: [S, M, L, XL]
-        scenario: [H1, H2, H3, H4, H5, H6, H7, H8, H9]
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     env:
       BENCH_SIZE: ${{ matrix.size }}
       BENCH_SCENARIO: ${{ matrix.scenario }}
@@ -152,11 +211,11 @@ jobs:
       - name: Install pinned dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Download the shared starting timetables
+      - name: Download shared timetables, XML inputs and dataset manifests
         uses: actions/download-artifact@v8
         with:
-          name: benchmark-instances
-          path: experiments/instances/
+          name: benchmark-inputs
+          path: .
 
       - name: Record environment and verify shared instances
         run: |
@@ -170,7 +229,8 @@ jobs:
           count = 3 if size in ("S", "M") else 1
           hashes = {}
           for seed in range(1, count + 1):
-              path = Path("experiments/instances") / f"{size}-{seed}.json"
+              filename = f"{size}.json" if size.startswith("itc-") else f"{size}-{seed}.json"
+              path = Path("experiments/instances") / filename
               hashes[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
           data = dict(commit=os.environ["GITHUB_SHA"], os=platform.platform(),
                       python=platform.python_version(), cpu=platform.processor(),
@@ -211,9 +271,11 @@ jobs:
           retention-days: 7
 
   report:
-    needs: benchmark
+    needs: [prepare, benchmark]
     runs-on: windows-2025
     timeout-minutes: 30
+    env:
+      EXPECTED_CSVS: ${{ needs.prepare.outputs.expected_csvs }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -229,21 +291,24 @@ jobs:
           pattern: perf-*
           path: downloaded-results/
 
-      - name: Include the shared starting timetables
+      - name: Include shared timetables, XML inputs and dataset manifests
         uses: actions/download-artifact@v8
         with:
-          name: benchmark-instances
-          path: experiments/instances/
+          name: benchmark-inputs
+          path: .
 
       - name: Combine CSVs and retain environment records
         run: |
           python - <<'PY'
-          import csv, shutil
+          import csv, json, os, shutil
           from pathlib import Path
           from experiments.perf import FIELDS
           files = sorted(Path("downloaded-results").rglob("perf-*.csv"))
-          if len(files) != 36:
-              raise RuntimeError(f"Expected 36 result CSVs; found {len(files)}")
+          expected = int(os.environ["EXPECTED_CSVS"])
+          plan = json.loads(Path("benchmark-metadata/benchmark-plan.json").read_text(encoding="utf-8"))
+          wanted = {f"perf-{j['size']}-{j['scenario']}.csv" for j in plan["jobs"]}
+          if len(files) != expected or {p.name for p in files} != wanted:
+              raise RuntimeError(f"Expected the {expected} planned result CSVs; found {len(files)}")
           out = Path("experiments/results/perf.csv")
           out.parent.mkdir(parents=True, exist_ok=True)
           with out.open("w", newline="", encoding="utf-8") as fh:
@@ -278,5 +343,6 @@ jobs:
           path: |
             experiments/results/
             experiments/instances/
+            experiments/itc/
             benchmark-metadata/
           retention-days: 7
