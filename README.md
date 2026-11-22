@@ -6,8 +6,9 @@ using OR-Tools CP-SAT as the exact solver.
 
 ## Setup
 
+All code lives in the solution folder, next to `Article implementation.slnx`.
+
 ```powershell
-cd "Article implementation"
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
