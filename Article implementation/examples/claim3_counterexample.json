@@ -1,0 +1,30 @@
+{
+ "description": "Counterexample to Claim 3 (Section 6). Lessons X, Y, A of group G1 are at hours 1-3; A's room RA closes, Omega_A = {1, 6}, Omega_X = {1, 3}. A->6 changes one lesson but creates three gaps; A->1, X->3 changes two lessons and creates none. The quality trigger (Delta G+ = 3 > theta_G) adds X, and the second solution wins only when delta_k >= w^T.",
+ "instance": {
+  "name": "claim3-counterexample",
+  "days": 1,
+  "hours": 6,
+  "breaks": [],
+  "rooms": [
+   {"id": "RA", "capacity": 30},
+   {"id": "RB", "capacity": 30, "unavailable": [[1, 2], [1, 3], [1, 4], [1, 5]]},
+   {"id": "RX", "capacity": 30},
+   {"id": "RY", "capacity": 30}
+  ],
+  "lecturers": [{"id": "LX"}, {"id": "LY"}, {"id": "LA"}],
+  "groups": [{"id": "G1", "size": 20}],
+  "lessons": [
+   {"id": "X", "duration": 1, "lecturers": ["LX"], "groups": ["G1"], "course": "CX", "rooms": ["RX"], "starts": [[1, 1], [1, 3]]},
+   {"id": "Y", "duration": 1, "lecturers": ["LY"], "groups": ["G1"], "course": "CY", "rooms": ["RY"], "starts": [[1, 2]]},
+   {"id": "A", "duration": 1, "lecturers": ["LA"], "groups": ["G1"], "course": "CA", "rooms": ["RA", "RB"], "starts": [[1, 1], [1, 3], [1, 6]]}
+  ]
+ },
+ "timetable": {"X": [1, 1, "RX"], "Y": [1, 2, "RY"], "A": [1, 3, "RA"]},
+ "locks": {},
+ "protected": {},
+ "gap_protected": [],
+ "params": {"time_limit": 20.0, "workers": 4},
+ "disruptions": [
+  {"type": "room_unavailable", "room": "RA", "note": "room of lesson A closes"}
+ ]
+}

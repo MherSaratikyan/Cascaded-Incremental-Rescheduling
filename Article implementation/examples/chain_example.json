@@ -1,0 +1,39 @@
+{
+ "description": "Section 6 chain example. Room R0 of lesson A closes; A's only admissible assignment is hour 2 (room R1), occupied by B. Omega_B = {2,3,4}, but hour 3 violates the protected preference s_B of B's lecturer; Omega_C = {4,5}, C occupies 4 and 5 is free. Expected repair: A->2, B->4, C->5.",
+ "instance": {
+  "name": "chain-example",
+  "days": 1,
+  "hours": 5,
+  "breaks": [],
+  "rooms": [
+   {"id": "R0", "capacity": 30},
+   {"id": "R1", "capacity": 30, "unavailable": [[1, 1]]}
+  ],
+  "lecturers": [
+   {"id": "LA", "unavailable": [[1, 3], [1, 4], [1, 5]]},
+   {"id": "LB", "unavailable": [[1, 1], [1, 5]]},
+   {"id": "LC"}
+  ],
+  "groups": [
+   {"id": "GA", "size": 20},
+   {"id": "GB", "size": 20},
+   {"id": "GC", "size": 20}
+  ],
+  "lessons": [
+   {"id": "A", "duration": 1, "lecturers": ["LA"], "groups": ["GA"], "course": "CA", "rooms": ["R0", "R1"]},
+   {"id": "B", "duration": 1, "lecturers": ["LB"], "groups": ["GB"], "course": "CB", "rooms": ["R1"]},
+   {"id": "C", "duration": 1, "lecturers": ["LC"], "groups": ["GC"], "course": "CC", "rooms": ["R1"], "starts": [[1, 4], [1, 5]]}
+  ],
+  "soft": [
+   {"id": "sB", "kind": "pref", "lecturer": "LB", "unwanted": [[1, 3]]}
+  ]
+ },
+ "timetable": {"A": [1, 1, "R0"], "B": [1, 2, "R1"], "C": [1, 4, "R1"]},
+ "locks": {},
+ "protected": {"sB": "P0"},
+ "gap_protected": [],
+ "params": {"time_limit": 20.0, "workers": 4},
+ "disruptions": [
+  {"type": "room_unavailable", "room": "R0", "note": "room of lesson A closes"}
+ ]
+}
