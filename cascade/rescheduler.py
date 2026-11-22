@@ -14,7 +14,8 @@ from . import evaluate as ev
 from .context import SolveStats, StepContext
 from .cpsat_model import SubModel
 from .dependency import DependencyGraph
-from .explain import Deadline, counting_proof, find_mcs, find_mus, physical_check
+from .explain import (Deadline, counting_proof, find_mcs, find_mus, physical_check,
+                      regulation_model)
 from .model import Timetable
 from .result import Iteration, Outcome, Result
 
@@ -262,7 +263,7 @@ def reschedule(ctx: StepContext, strategy: Optional[Strategy] = None) -> Result:
         pool: list[str] = []
         if st.use_core and st.expansion == "weighted" and p.core_pool > 0 and not F >= all_free:
             pool = graph.ranked(graph.neighbours(F))[:p.core_pool]
-        sub = SubModel(c, F | set(pool), assumed_fixed=pool, budget=budget)
+        sub = SubModel(c, F | set(pool), assumed_fixed=pool, budget=budget, objectives=False)
         t_it = time.perf_counter()
         r = sub.check(dl.remaining(), hint=c.xk)
         it = Iteration(j=j, f_size=len(F), budget=budget, status=r.status,
@@ -319,7 +320,7 @@ def reschedule(ctx: StepContext, strategy: Optional[Strategy] = None) -> Result:
 
     # ---- first feasible X_j0: P* and frozen threshold P-bar = P* + delta_k
     phase("optimise")
-    opt = SubModel(c, F, budget=c.ladder[bi], assumptions=False)
+    opt = SubModel(c, F, budget=c.ladder[bi], assumptions=False, objectives=False)
     r1 = opt.minimize(opt.Pk, dl.remaining(), hint=feasible.timetable)
     res.stages.append(("P*", r1.status, r1.value, r1.bound))
     if r1.feasible:
@@ -368,8 +369,13 @@ def _classify(res: Result, c: StepContext, st: Strategy, finish, F) -> Result:
         res.notes.append("regulation-constrained problem proven infeasible; hard-only check timed out")
         return finish(Outcome.ALGORITHMIC_FAILURE, f_size=len(F))
     res.candidate = r.timetable
-    res.mus, res.mus_minimal = find_mus(c, edl)
-    res.mcs = find_mcs(c, edl)
+    if edl.expired:
+        res.notes.append("explanation budget used up by the hard-only check: no MUS/MCS")
+    else:
+        reg = regulation_model(c)                    # one model for both MUS and MCS
+        res.mus, res.mus_minimal = find_mus(c, edl, reg)
+        if not edl.expired:
+            res.mcs = find_mcs(c, edl, reg)
     return finish(Outcome.REGULATORY_INFEASIBLE, f_size=len(F))
 
 

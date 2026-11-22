@@ -112,8 +112,43 @@ earlier is reported as an algorithmic failure, with a hard-only candidate and th
   room stability (per course). All are linear, so (4) is exact.
 - **B6** is an *approximation* of Akkan et al. [4]: simulated annealing with a
   perturbation limit on the same model, not their exact algorithm.
-- **ITC 2019** loading is not implemented. The instance interface (`cascade/io.py`) is
-  where a loader would plug in. Parameters were not tuned on the ITC "early" group.
+- **ITC 2019** support is covered in the section below. Parameters were not tuned on the ITC "early" group.
+
+## ITC 2019 instances (adaptation A)
+
+`cascade/itc.py` reads the official ITC 2019 problem XML (https://www.itc2019.org/format) and maps it onto the
+paper's model. The mapping is an adaptation, not a 1:1 load:
+
+| ITC 2019 | Mapped to |
+|---|---|
+| `<time days start length weeks>` options | Multi-day time patterns on a 30-minute weekly grid (`Instance.patterns`). Weeks are merged, which is stricter than ITC. |
+| Rooms, capacities, `<unavailable>` | Kept. Unavailability that covers only some weeks is dropped. |
+| `<travel>` | Ignored |
+| `room="false"` | Gets a private virtual room |
+| Required `SameAttendees` / `NotOverlap` | Attendees (lecturer / group role) whose classes may not overlap |
+| Every other distribution, all soft distributions | Dropped |
+| Students and sectioning | Not modelled |
+| Penalised time options | A lecturer-preference soft constraint per attendee |
+
+Every dropped element is counted in a **fidelity report**, printed by `cascade.itc.fidelity_text(inst)`.
+
+The official instances need a registered login on itc2019.org. Instead,
+`experiments/itc_generator.py` writes **ITC 2019-style synthetic instances** in the same XML format. They have
+the competition's structure: MWF/TTh/lab patterns, odd and even weeks, courses with configurations, subparts and
+parent/child classes, travel times, students, and all distribution types, both required and soft. They are not
+the real competition instances.
+
+```powershell
+.venv\Scripts\python.exe -m experiments.itc_generator
+```
+
+That writes `experiments\itc\synth-s.xml`, `synth-m.xml` and `synth-l.xml`, with 216, 475 and 1,240 classes. Every
+`experiments\itc\<name>.xml`, whether real or generated, becomes the experiment size `itc-<name>`:
+- the heavy run includes them by default;
+- the perf tests use the two smallest;
+- the x^(0) timetable is solved once and cached in `experiments\instances`.
+
+Real ITC files can be dropped into the same folder.
 - **CP-SAT settings.** `find_big_linear_overlap` is off (on these models this presolve step
   takes most of the run time). Models with more than 5000 x-variables skip probing and
   symmetry detection. Models with fewer than 3000 use a single worker.

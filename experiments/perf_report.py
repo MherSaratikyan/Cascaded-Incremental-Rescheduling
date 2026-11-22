@@ -133,6 +133,16 @@ def _ordered(index, order):
     return [x for x in order if x in set(index)] + sorted(set(index) - set(order))
 
 
+BASE_SIZES = ["XS", "S", "M", "L", "XL"]
+
+
+def size_order(df: pd.DataFrame) -> list[str]:
+    """Synthetic sizes first, then ITC(-style) instances by number of lessons."""
+    known = [s for s in BASE_SIZES if s in set(df["size"])]
+    rest = df[~df["size"].isin(BASE_SIZES)].groupby("size")["lessons"].max().sort_values()
+    return known + list(rest.index)
+
+
 # --------------------------------------------------------------------- charts
 def _style(ax, title: str, ylabel: str) -> None:
     ax.set_facecolor(SURFACE)
@@ -385,6 +395,8 @@ def build_report(csv_path: Path, out_dir: Path, lang: str = "hy") -> Path:
     matplotlib.use("Agg")
     out_dir.mkdir(parents=True, exist_ok=True)
     df = load(Path(csv_path))
+    global SIZE_ORDER
+    SIZE_ORDER = size_order(df)
     limits = sorted(set(df.loc[df["method"] != "REF", "time_limit"].dropna().astype(float))) or [30]
     chart_elapsed(df, out_dir / "elapsed_vs_size.png", limits=tuple(sorted(set(limits) | {10, 30, 60})))
     chart_memory(df, out_dir / "memory_vs_size.png")

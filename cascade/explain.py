@@ -49,7 +49,8 @@ def minimize_core(sub: SubModel, core: list, dl: Deadline, cap: float = 2.0) -> 
 def regulation_model(ctx: StepContext, relaxed=(), assumptions=True) -> SubModel:
     """F = E (fully locked lessons included as variables with lock literals),
     budget dropped (B >= sum_e w_e^T makes it redundant, Claim 2)."""
-    return SubModel(ctx, ctx.inst.lessons, budget=None, relaxed=relaxed, assumptions=assumptions)
+    return SubModel(ctx, ctx.inst.lessons, budget=None, relaxed=relaxed, assumptions=assumptions,
+                    objectives=False)
 
 
 def counting_proof(ctx: StepContext) -> Optional[str]:
@@ -76,12 +77,13 @@ def counting_proof(ctx: StepContext) -> Optional[str]:
 
 def physical_check(ctx: StepContext, seconds: float):
     sub = SubModel(ctx, ctx.inst.lessons, protected=False, locks=False, gap_protection=False,
-                   assumptions=False)
+                   assumptions=False, objectives=False)
     return sub.check(seconds, hint=ctx.xk)
 
 
-def find_mus(ctx: StepContext, dl: Deadline) -> tuple[Optional[list], bool]:
-    sub = regulation_model(ctx)
+def find_mus(ctx: StepContext, dl: Deadline, sub: Optional[SubModel] = None
+             ) -> tuple[Optional[list], bool]:
+    sub = sub or regulation_model(ctx)
     r = sub.check(dl.remaining(), hint=ctx.xk)
     if not r.infeasible:
         return None, False
@@ -89,11 +91,13 @@ def find_mus(ctx: StepContext, dl: Deadline) -> tuple[Optional[list], bool]:
     return minimize_core(sub, core, dl, cap=max(1.0, dl.remaining() / 4))
 
 
-def find_mcs(ctx: StepContext, dl: Deadline) -> list[Correction]:
+def find_mcs(ctx: StepContext, dl: Deadline, sub: Optional[SubModel] = None) -> list[Correction]:
     """Minimum-cardinality correction sets, enumerated by blocking, each one
-    verified by an independent re-solve of the relaxed regulation model."""
+    verified by an independent re-solve of the relaxed regulation model.
+    ``sub`` may be the model already used by :func:`find_mus` (it is reused:
+    MCS search clears the assumptions and only adds blocking clauses)."""
     p = ctx.params
-    sub = regulation_model(ctx)          # literals stay free (no assumptions posted)
+    sub = sub or regulation_model(ctx)   # literals stay free (no assumptions posted)
     lits = sub.lits
     if not lits:
         return []
@@ -110,6 +114,9 @@ def find_mcs(ctx: StepContext, dl: Deadline) -> list[Correction]:
         if not relaxed or len(relaxed) > p.mcs_max_size:
             break
         if r.status != "OPTIMAL" and out and len(relaxed) > len(out[-1].items) + p.mcs_max_size:
+            break
+        if dl.remaining() < 0.5:         # no time left to re-solve: report unverified
+            out.append(Correction(items=relaxed, verified=False, candidate=r.timetable))
             break
         check = regulation_model(ctx, relaxed=relaxed, assumptions=False)
         v = check.check(dl.remaining(), hint=r.timetable)

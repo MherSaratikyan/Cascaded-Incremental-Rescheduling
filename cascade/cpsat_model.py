@@ -108,7 +108,11 @@ class SubModel:
                  assumed_fixed: Iterable[str] = (), budget: Optional[int] = None,
                  cap: Optional[int] = None, protected: bool = True, locks: bool = True,
                  gap_protection: bool = True, relaxed: Iterable[Item] = (),
-                 assumptions: bool = True):
+                 assumptions: bool = True, objectives: bool = True):
+        """``objectives=False`` builds a pure feasibility model: the objective
+        expressions G, Delta G^+ and Q_O (and their auxiliary variables) are
+        skipped; gap variables exist only for participants protected by (9).
+        P_k / P^0 are always available."""
         self.ctx = ctx
         inst = ctx.inst
         prm = ctx.params
@@ -225,11 +229,15 @@ class SubModel:
         self.soft_expr: dict[str, Lin] = {}
         q_parts: list[Lin] = []
         for sid, s in inst.soft.items():
+            enforce = sid in ctx.status and protected and ("prot", sid) not in self.relaxed
+            if sid in ctx.status and not enforce:
+                continue
+            if sid not in ctx.status and not objectives:
+                continue
             expr = self._soft_expr(s)
             self.soft_expr[sid] = expr
-            if sid in ctx.status:
-                if protected and ("prot", sid) not in self.relaxed:
-                    self._le(expr, ctx.beta[sid], ("prot", sid))
+            if enforce:
+                self._le(expr, ctx.beta[sid], ("prot", sid))
             else:
                 q_parts.append(expr * ev.q_coef(inst, s, prm.q_scale))
         self.QO = Lin.sum(q_parts)
@@ -248,14 +256,17 @@ class SubModel:
         for u, part in inst.participants.items():
             wu = int(round(part.weight))
             protect = gap_protection and u in ctx.gap_protected and ("gap", u) not in self.relaxed
+            if not objectives and not protect:
+                continue                     # feasibility model: (6)-(8) not needed for u
             for d in range(1, D + 1):
                 gk = ctx.gaps_k.get((u, d), 0)
                 if d in days_of.get(u, ()):
                     Gud = self._gap_expr(u, d)
-                    h = m.new_int_var(0, H, "").index
-                    self._ge(Lin([h]) - Gud, -gk)              # h >= G_ud - G_ud^k   (8)
-                    G_parts.append(Gud * wu)
-                    dG_parts.append(Lin([h], [wu]))
+                    if objectives:
+                        h = m.new_int_var(0, H, "").index
+                        self._ge(Lin([h]) - Gud, -gk)          # h >= G_ud - G_ud^k   (8)
+                        G_parts.append(Gud * wu)
+                        dG_parts.append(Lin([h], [wu]))
                     if protect:
                         self._le(Gud, gk, ("gap", u))           # (9)
                 else:

@@ -94,6 +94,28 @@ def test_cascade_repairs_a_room_closure_on_itc_data(itc):
     assert r7.metrics["P_k"] >= r4.p_star
 
 
+def test_itc_style_generator_writes_the_official_format(tmp_path):
+    """The ITC 2019-style generator writes a problem XML with the competition's
+    structure - multi-day patterns, odd/even-week labs, parent-child classes,
+    room-less classes, travel times, students, and required + soft
+    distributions of many types - that loads through the same ITC loader."""
+    import xml.etree.ElementTree as ET
+    from experiments.itc_generator import make
+    path = make("s", seed=5, out_dir=tmp_path, check=False)
+    root = ET.parse(path).getroot()
+    assert root.tag == "problem" and root.get("slotsPerDay") == "288"
+    times = root.findall(".//class/time")
+    assert {t.get("days") for t in times} >= {"1010100", "0101000"}          # MWF, TTh
+    assert {t.get("weeks") for t in times} >= {"1" * 13, "1010101010101"}    # all / odd weeks
+    assert root.findall(".//class[@parent]") and root.findall(".//class[@room='false']")
+    assert root.findall(".//room/travel") and root.findall(".//students/student")
+    types = {d.get("type").split("(")[0] for d in root.iter("distribution")}
+    assert {"SameAttendees", "NotOverlap", "Precedence", "MaxDays"} <= types
+    assert root.findall(".//distribution[@required='true']") and root.findall(".//distribution[@penalty]")
+    inst = load_itc(path)
+    assert len(inst.lessons) > 100 and inst.meta["itc"]["attendees"] > 50
+
+
 def test_voluntary_request_for_another_time_pattern(itc):
     """A move request names one of the class's own ITC time patterns."""
     inst, x0 = itc

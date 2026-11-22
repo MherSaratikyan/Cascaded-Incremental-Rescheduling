@@ -76,7 +76,25 @@ The instance has 20 lessons, ρ=0.3 protected and λ=0.15 locked, with random di
 | `test_b6_heuristic_produces_valid_or_failure` | Baseline B6 | B6 either returns a hard-feasible timetable or reports an algorithmic failure. | 3.2 s |
 | `test_io_roundtrip` | — | The instance and x^(0) survive JSON save and load, and the result stays hard-feasible. | <0.01 s |
 
+### `tests/test_itc.py`: ITC 2019 loader (adaptation A)
+
+These run on the hand-written `examples/itc_sample.xml` and a generated ITC-style file.
+
+| Test | Expected result and why |
+|---|---|
+| `test_mapping_keeps_and_counts_what_it_drops` | 6 classes become 6 lessons. The 3 required SameAttendees and 1 NotOverlap become attendees. Precedence, MaxDays and the soft SameRoom are dropped and counted, as are the partial-week unavailability, 2 travel entries and 2 students. |
+| `test_multi_day_time_options_become_patterns` | "MoWeFr 08:00-08:50" becomes one pattern of 6 half-hour cells on days {1,3,5}. The room-less class gets a virtual room, and attendees follow the distributions. |
+| `test_room_unavailability_covering_all_weeks_is_kept` | Room 3's Mon+Tue unavailability, which covers every week, closes those cells. |
+| `test_json_roundtrip_of_pattern_instance` | Pattern instances and `[time id, room]` timetables survive JSON. |
+| `test_initial_timetable_is_hard_feasible` | x^(0) places all 6 classes without a clash. |
+| `test_cascade_repairs_a_room_closure_on_itc_data` | Room 1 closes for the week. B7 repairs the timetable through a chain (the core names class 5), B4 agrees, and nothing is left in room 1. |
+| `test_itc_style_generator_writes_the_official_format` | The generator's XML has the ITC features (MWF/TTh, odd weeks, parents, room-less classes, travel, students, required and soft distributions of many types) and loads through the loader. |
+| `test_voluntary_request_for_another_time_pattern` | A request naming one of the class's own ITC time patterns is solved, and the class ends up there. |
+
 ## Tier 2: performance smoke tests (`pytest -m perf`)
+
+When ITC instances, real or generated, are present in `experiments/itc`, the two smallest are added to this tier
+with scenarios H1, H5 and H9. The H9 distance-to-optimum test covers them too.
 
 These run scenarios H1, H5, H7 and H9 on sizes S (60 lessons) and M (200 lessons) with seed 1. The methods are
 B7 and B4, plus the reference REF (B4 with a 120 s limit) for H1, H7 and H9. **Every request runs in a fresh

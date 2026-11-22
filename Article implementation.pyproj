@@ -52,6 +52,7 @@
     <Compile Include="cascade\explain.py" />
     <Compile Include="cascade\instrument.py" />
     <Compile Include="cascade\io.py" />
+    <Compile Include="cascade\itc.py" />
     <Compile Include="cascade\messages.py" />
     <Compile Include="cascade\model.py" />
     <Compile Include="cascade\params.py" />
@@ -61,6 +62,7 @@
     <Compile Include="experiments\__init__.py" />
     <Compile Include="experiments\analysis.py" />
     <Compile Include="experiments\generator.py" />
+    <Compile Include="experiments\itc_generator.py" />
     <Compile Include="experiments\measure.py" />
     <Compile Include="experiments\perf.py" />
     <Compile Include="experiments\perf_report.py" />
@@ -70,12 +72,14 @@
     <Compile Include="tests\test_claims.py" />
     <Compile Include="tests\test_examples.py" />
     <Compile Include="tests\test_gaps.py" />
+    <Compile Include="tests\test_itc.py" />
     <Compile Include="tests\test_perf.py" />
     <Compile Include="tests\test_procedure.py" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="examples\chain_example.json" />
     <Content Include="examples\claim3_counterexample.json" />
+    <Content Include="examples\itc_sample.xml" />
     <Content Include="requirements.txt" />
     <Content Include="README.md" />
     <Content Include="TESTS.md" />

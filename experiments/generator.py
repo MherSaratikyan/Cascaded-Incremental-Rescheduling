@@ -291,7 +291,7 @@ def itc_path(size: str, itc_dir: Path = ITC_DIR) -> Path:
 def load_itc_instance(size: str, cache_dir: Path, time_limit: float = 120.0,
                       workers: int = 8) -> tuple[Instance, Timetable]:
     """ITC 2019 instance mapped by cascade.itc (adaptation A) and its x^(0):
-    one full CP-SAT solve for small instances, else greedy + windowed repair.
+    a full CP-SAT solve warm-started by the greedy, else greedy + windowed repair.
     Cached as experiments/instances/<size>.json (seed-independent)."""
     from cascade.itc import load_itc
     path = Path(cache_dir) / f"{size}.json"
@@ -300,9 +300,10 @@ def load_itc_instance(size: str, cache_dir: Path, time_limit: float = 120.0,
         inst = io.instance_from_dict(d["instance"])
         return inst, io.timetable_from_dict(inst, d["timetable"])
     inst = load_itc(itc_path(size))
-    x0 = None
-    if len(inst.lessons) <= ITC_SMALL:
-        x0 = initial_timetable(inst, time_limit, workers)
+    # ITC classes have few options each (tens, not hundreds), so a full solve is
+    # affordable even for large instances; the windowed construction is the fallback
+    budget = time_limit if len(inst.lessons) <= ITC_SMALL else 2 * time_limit
+    x0 = initial_timetable(inst, budget, workers)
     if x0 is None:
         x0 = windowed_timetable(inst, time_budget=max(time_limit, 240.0), workers=min(workers, 4))
     if x0 is None or not ev.hard_violations(inst, x0).ok:
