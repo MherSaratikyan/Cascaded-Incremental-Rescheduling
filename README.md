@@ -61,6 +61,14 @@ Three test tiers:
    `experiments/results/perf.csv` and `experiments/results/perf_report/report.md` with four charts:
    elapsed time vs size, peak memory vs size, P_k/P_k*, and the outcome mix.
 
+Chart texts are in **Armenian** by default, with methods labelled Բ1–Բ7 as in the paper. For English charts:
+
+```powershell
+.venv\Scripts\python.exe -m experiments.perf_report experiments\results\perf_tests.csv --out experiments\results\perf_tests_report --lang en
+```
+
+The report tables stay in English either way.
+
 The L and XL starting timetables x^(0) come from a greedy construction followed by windowed
 CP-SAT repair: at most 60 lessons of one day are re-optimised at a time, which keeps memory bounded.
 S and M use one full CP-SAT solve.

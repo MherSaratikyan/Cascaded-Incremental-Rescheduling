@@ -34,6 +34,68 @@ OUTCOME_GROUPS = [
 ]
 from experiments.scenarios import SINGLE  # noqa: E402  (single-request scenarios)
 
+# ----------------------------------------------------------- chart language
+# Chart texts in Armenian ("hy", default) or English ("en").  Method codes follow
+# the paper: Բ1-Բ7 in Armenian, B1-B7 in English.  Report tables stay in English.
+LANG = "hy"
+TEXTS = {
+    "en": {
+        "elapsed_title": "Elapsed (wall-clock) time per request, median by size",
+        "elapsed_y": "seconds (log scale)",
+        "limit": "{v:g} s limit",
+        "lessons": "{n} lessons",
+        "mem_commit": "Peak committed memory (virtual, private bytes)",
+        "mem_wset": "Peak working set (physical RAM)",
+        "mem_y": "MB, median per request",
+        "guard": "memory guard {v:g} MB",
+        "pk_title": "Changes relative to the optimum: P_k / P_k*\n(single-request scenarios, solved)",
+        "pk_y": "P_k / P_k*   (1 = minimal changes)",
+        "pk_empty": "no solved single-request case with a proven reference yet",
+        "out_title": "Outcome mix per size and method",
+        "out_y": "share of requests",
+    },
+    "hy": {
+        "elapsed_title": "Հարցման մշակման իրական ժամանակը (մեդիան՝ ըստ խնդրի չափի)",
+        "elapsed_y": "վայրկյան (լոգարիթմական սանդղակ)",
+        "limit": "{v:g} վ սահման",
+        "lessons": "{n} դաս",
+        "mem_commit": "Հատկացված վիրտուալ հիշողության առավելագույն ծավալը",
+        "mem_wset": "Ֆիզիկական հիշողության առավելագույն ծավալը",
+        "mem_y": "ՄԲ, մեդիան՝ մեկ հարցման համար",
+        "guard": "հիշողության սահման՝ {v:g} ՄԲ",
+        "pk_title": "Փոփոխությունները օպտիմումի համեմատ՝ P_k / P_k*\n(մեկ հարցմամբ լուծված սցենարներ)",
+        "pk_y": "P_k / P_k*   (1 = նվազագույն)",
+        "pk_empty": "Ապացուցված օպտիմումով լուծված մեկ հարցման դեպք դեռ չկա",
+        "out_title": "Ելքերի բաշխումը՝ ըստ խնդրի չափի և մեթոդի",
+        "out_y": "հարցումների բաժինը",
+    },
+}
+METHOD_LABEL_HY = {"B1": "Բ1 տեղային ստուգում", "B2": "Բ2 շղթա՝ միայն խիստ պայմաններով",
+                   "B3": "Բ3 ամբողջական (միայն խիստ)", "B4": "Բ4 ամբողջական (կանոնակարգով)",
+                   "B5": "Բ5 կշռազուրկ ընդլայնում", "B6": "Բ6 տեղային որոնում",
+                   "B7": "Բ7 առաջարկվող"}
+OUTCOME_LABEL_HY = {"solved": "լուծում", "physical infeasibility": "ֆիզիկական անիրագործելիություն",
+                    "regulatory infeasibility": "կանոնակարգային անիրագործելիություն",
+                    "lock conflict": "ամրագրման հակասություն", "rejected": "մերժում",
+                    "time limit": "ալգորիթմական ձախողում (ժամանակ)",
+                    "memory limit": "հիշողության սահման", "error": "սխալ"}
+
+
+def T(key: str, **fmt) -> str:
+    return TEXTS[LANG][key].format(**fmt)
+
+
+def method_label(m: str) -> str:
+    return (METHOD_LABEL_HY if LANG == "hy" else METHOD_LABEL).get(m, m)
+
+
+def method_code(m: str) -> str:
+    return method_label(m).split(" ", 1)[0] if m in METHOD_LABEL else m
+
+
+def outcome_label(g: str) -> str:
+    return OUTCOME_LABEL_HY.get(g, g) if LANG == "hy" else g
+
 
 def load(csv_path: Path) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
@@ -94,26 +156,28 @@ def chart_elapsed(df: pd.DataFrame, path: Path, limits=(10, 30, 60)) -> None:
     import matplotlib.pyplot as plt
     d = df[df["method"].isin(METHOD_ORDER)]
     sizes = _ordered(d["size"].unique(), SIZE_ORDER)
-    fig, ax = plt.subplots(figsize=(9.5, 4.6), dpi=150, facecolor=SURFACE)
-    _style(ax, "Elapsed (wall-clock) time per request, median by size", "seconds (log scale)")
+    fig, ax = plt.subplots(figsize=(9.5, 5.0), dpi=150, facecolor=SURFACE)
+    _style(ax, T("elapsed_title"), T("elapsed_y"))
     x = np.arange(len(sizes))
     for m in _ordered(d["method"].unique(), METHOD_ORDER):
         med = d[d["method"] == m].groupby("size")["elapsed_s"].median().reindex(sizes)
         ax.plot(x, med.values, color=METHOD_COLOR.get(m, MUTED), linewidth=2, marker=MARKERS.get(m, "o"),
-                markersize=6, markeredgecolor=SURFACE, markeredgewidth=1.2, label=METHOD_LABEL.get(m, m))
+                markersize=6, markeredgecolor=SURFACE, markeredgewidth=1.2, label=method_label(m))
     from matplotlib.ticker import FuncFormatter, LogLocator
     for lim in limits:
         ax.axhline(lim, color=MUTED, linewidth=0.8, linestyle=(0, (4, 3)))
-        ax.annotate(f"{lim:g} s limit", xy=(1.0, lim), xycoords=("axes fraction", "data"),
+        ax.annotate(T("limit", v=lim), xy=(1.0, lim), xycoords=("axes fraction", "data"),
                     xytext=(4, 0), textcoords="offset points", va="center", fontsize=8, color=MUTED)
     ax.set_yscale("log")
     ax.yaxis.set_major_locator(LogLocator(base=10, subs=(1.0, 2.0, 5.0)))
     ax.yaxis.set_minor_locator(LogLocator(base=10, subs=()))
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
-    ax.set_xticks(x, [f"{s}\n({int(d[d['size'] == s]['lessons'].max())} lessons)" for s in sizes])
+    ax.set_xticks(x, [f"{s}\n({T('lessons', n=int(d[d['size'] == s]['lessons'].max()))})" for s in sizes])
     ax.set_xlim(-0.4, len(sizes) - 0.6)
-    _legend(ax, loc="upper left", bbox_to_anchor=(1.12, 1.0))
-    fig.tight_layout()
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=min(4, max(1, len(labels))), frameon=False,
+               fontsize=8.5, labelcolor=INK2)
+    fig.tight_layout(rect=(0, 0.1, 1, 1))
     fig.savefig(path, facecolor=SURFACE)
     plt.close(fig)
 
@@ -124,22 +188,21 @@ def chart_memory(df: pd.DataFrame, path: Path, guard_mb: float = 3072) -> None:
     sizes = _ordered(d["size"].unique(), SIZE_ORDER)
     x = np.arange(len(sizes))
     fig, axes = plt.subplots(1, 2, figsize=(11, 5.0), dpi=150, facecolor=SURFACE, sharey=False)
-    panels = [("peak_commit_mb", "Peak committed memory (virtual, private bytes)"),
-              ("peak_wset_mb", "Peak working set (physical RAM)")]
+    panels = [("peak_commit_mb", T("mem_commit")), ("peak_wset_mb", T("mem_wset"))]
     for ax, (col, title) in zip(axes, panels):
-        _style(ax, title, "MB, median per request")
+        _style(ax, title, T("mem_y"))
         for m in _ordered(d["method"].unique(), METHOD_ORDER):
             med = d[d["method"] == m].groupby("size")[col].median().reindex(sizes)
             ax.plot(x, med.values, color=METHOD_COLOR.get(m, MUTED), linewidth=2,
                     marker=MARKERS.get(m, "o"), markersize=6, markeredgecolor=SURFACE,
-                    markeredgewidth=1.2, label=METHOD_LABEL.get(m, m))
+                    markeredgewidth=1.2, label=method_label(m))
         ax.set_xticks(x, sizes)
         ax.set_xlim(-0.4, len(sizes) - 0.6)
     top = max(guard_mb, float(np.nanmax(d["peak_commit_mb"].values)) if len(d) else 0) * 1.1
     axes[0].set_ylim(0, top)
     axes[1].set_ylim(bottom=0)
     axes[0].axhline(guard_mb, color=MUTED, linewidth=0.8, linestyle=(0, (4, 3)))
-    axes[0].annotate(f"memory guard {guard_mb:g} MB", xy=(0.0, guard_mb), xycoords=("axes fraction", "data"),
+    axes[0].annotate(T("guard", v=guard_mb), xy=(0.0, guard_mb), xycoords=("axes fraction", "data"),
                      xytext=(4, 3), textcoords="offset points", va="bottom", fontsize=8, color=MUTED)
     handles, labels = axes[1].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=min(4, max(1, len(labels))), frameon=False,
@@ -153,12 +216,11 @@ def chart_pk_ratio(df: pd.DataFrame, path: Path) -> None:
     import matplotlib.pyplot as plt
     d = df[df["method"].isin(METHOD_ORDER) & df["pk_ratio"].notna()]
     methods = _ordered(d["method"].unique(), METHOD_ORDER)
-    fig, ax = plt.subplots(figsize=(8, 4.4), dpi=150, facecolor=SURFACE)
-    _style(ax, "Changes relative to the optimum: P_k / P_k* (single-request scenarios, solved)",
-           "P_k / P_k*   (1 = minimal number of changes)")
+    fig, ax = plt.subplots(figsize=(8.5, 4.8), dpi=150, facecolor=SURFACE)
+    _style(ax, T("pk_title"), T("pk_y"))
     data = [d[d["method"] == m]["pk_ratio"].values for m in methods]
     if not data:
-        ax.text(0.5, 0.5, "no solved single-request case with a proven reference yet",
+        ax.text(0.5, 0.5, T("pk_empty"),
                 transform=ax.transAxes, ha="center", va="center", color=MUTED, fontsize=9)
         ax.set_xticks([])
     else:
@@ -178,7 +240,7 @@ def chart_pk_ratio(df: pd.DataFrame, path: Path) -> None:
             ax.scatter(i + jitter, vals, s=42, color=METHOD_COLOR.get(m, MUTED), edgecolor=SURFACE,
                        linewidth=1.2, zorder=3)
         ax.set_xticks(range(1, len(methods) + 1),
-                      [METHOD_LABEL.get(m, m).replace(" ", "\n", 1) + f"\nn = {len(v)}"
+                      [method_label(m).replace(" ", "\n", 1) + f"\nn = {len(v)}"
                        for m, v in zip(methods, data)])
     ax.axhline(1.0, color=MUTED, linewidth=0.8, linestyle=(0, (4, 3)))
     fig.tight_layout()
@@ -192,22 +254,22 @@ def chart_outcomes(df: pd.DataFrame, path: Path) -> None:
     sizes = _ordered(d["size"].unique(), SIZE_ORDER)
     groups = [g for g, _ in OUTCOME_GROUPS]
     colors = dict(zip(groups, SLOTS))
-    fig, axes = plt.subplots(1, len(sizes), figsize=(3.1 * len(sizes) + 1.5, 4.6), dpi=150,
+    fig, axes = plt.subplots(1, len(sizes), figsize=(3.1 * len(sizes) + 3.0, 4.6), dpi=150,
                              facecolor=SURFACE, sharey=True, squeeze=False)
     for ax, size in zip(axes[0], sizes):
         sub = d[d["size"] == size]
         methods = _ordered(sub["method"].unique(), METHOD_ORDER)
         share = pd.crosstab(sub["method"], sub["outcome_group"], normalize="index").reindex(methods)
-        _style(ax, f"{size}", "share of requests" if ax is axes[0][0] else "")
+        _style(ax, f"{size}", T("out_y") if ax is axes[0][0] else "")
         bottom = np.zeros(len(methods))
         for g in groups:
             if g not in share:
                 continue
             vals = share[g].fillna(0).values
             ax.bar(range(len(methods)), vals, bottom=bottom, color=colors[g], width=0.7,
-                   edgecolor=SURFACE, linewidth=1.5, label=g)
+                   edgecolor=SURFACE, linewidth=1.5, label=outcome_label(g))
             bottom += vals
-        ax.set_xticks(range(len(methods)), methods)
+        ax.set_xticks(range(len(methods)), [method_code(m) for m in methods])
         ax.set_ylim(0, 1.0)
     handles, labels = [], []
     for ax in axes[0]:
@@ -216,8 +278,10 @@ def chart_outcomes(df: pd.DataFrame, path: Path) -> None:
                 handles.append(h)
                 labels.append(l)
     fig.legend(handles, labels, loc="center right", frameon=False, fontsize=8.5, labelcolor=INK2)
-    fig.suptitle("Outcome mix per size and method", x=0.01, ha="left", fontsize=11, color=INK)
-    fig.tight_layout(rect=(0, 0, 1 - 1.4 / (3.1 * len(sizes) + 1.5), 0.95))
+    fig.suptitle(T("out_title"), x=0.01, ha="left", fontsize=11, color=INK)
+    width = fig.get_size_inches()[0]
+    reserve = 0.45 + 0.072 * max((len(l) for l in labels), default=10)     # inches for the legend
+    fig.tight_layout(rect=(0, 0, 1 - reserve / width, 0.95))
     fig.savefig(path, facecolor=SURFACE)
     plt.close(fig)
 
@@ -310,7 +374,13 @@ def tables(df: pd.DataFrame) -> list[str]:
     return out
 
 
-def build_report(csv_path: Path, out_dir: Path) -> Path:
+def build_report(csv_path: Path, out_dir: Path, lang: str = "hy") -> Path:
+    """Tables (English) + four charts; ``lang`` = "hy" (Armenian, default) or "en"
+    sets the language of the chart texts."""
+    global LANG
+    if lang not in TEXTS:
+        raise ValueError(f"lang must be one of {sorted(TEXTS)}")
+    LANG = lang
     import matplotlib
     matplotlib.use("Agg")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -341,6 +411,8 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("csv")
     ap.add_argument("--out", default="experiments/results/perf_report")
+    ap.add_argument("--lang", choices=sorted(TEXTS), default="hy",
+                    help="language of the chart texts (default: Armenian)")
     a = ap.parse_args(argv)
     csv_path = Path(a.csv)
     if not csv_path.exists():
@@ -352,7 +424,7 @@ def main(argv=None) -> None:
             "  .venv\\Scripts\\python.exe -m pytest -m perf          (~25 min, writes experiments\\results\\perf_tests.csv)\n"
             "  .venv\\Scripts\\python.exe -m experiments.perf        (heavy run, ~9-10 h, writes experiments\\results\\perf.csv)\n"
             + (f"CSV files already in {results}: {', '.join(found)}" if found else ""))
-    print(build_report(csv_path, Path(a.out)))
+    print(build_report(csv_path, Path(a.out), a.lang))
 
 
 if __name__ == "__main__":
