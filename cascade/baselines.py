@@ -19,9 +19,9 @@ from collections import Counter
 from typing import Optional
 
 from . import evaluate as ev
-from .context import StepContext
+from .context import SolveStats, StepContext
 from .explain import Deadline
-from .rescheduler import STRATEGIES, compute_metrics, reschedule
+from .rescheduler import STRATEGIES, compute_metrics, reschedule, solver_metrics
 from .result import Outcome, Result
 
 METHODS = ("B1", "B2", "B3", "B4", "B5", "B6", "B7")
@@ -218,6 +218,9 @@ def b6_local_search(ctx: StepContext) -> Result:
     if hard == 0:
         res.outcome = Outcome.SOLVED
         res.timetable = best_tt
+    res.phases = {"search": res.seconds}
+    ctx.stats = SolveStats()                 # no CP-SAT calls in B6
     res.metrics = compute_metrics(ctx, res.timetable, len(movable))
-    res.metrics["iterations"] = it
+    res.metrics.update(solver_metrics(res, ctx))
+    res.metrics["iterations"] = it           # local-search moves
     return res

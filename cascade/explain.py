@@ -52,6 +52,27 @@ def regulation_model(ctx: StepContext, relaxed=(), assumptions=True) -> SubModel
     return SubModel(ctx, ctx.inst.lessons, budget=None, relaxed=relaxed, assumptions=assumptions)
 
 
+def counting_proof(ctx: StepContext) -> Optional[str]:
+    """Exact sufficient condition for physical infeasibility: a participant
+    whose lessons need more hours than the slots any of them can cover.
+    (Participants attend one lesson at a time, so the lessons need disjoint hours.)"""
+    inst = ctx.inst
+    lessons_of: dict[str, list[str]] = {}
+    for e, l in inst.lessons.items():
+        for u in l.participants:
+            lessons_of.setdefault(u, []).append(e)
+    for u, es in sorted(lessons_of.items()):
+        need = sum(inst.lessons[e].duration for e in es)
+        avail: set[int] = set()
+        for e in es:
+            d = inst.lessons[e].duration
+            for t in {t for t, _ in ctx.omega[e]}:
+                avail.update(range(t, t + d))
+        if need > len(avail):
+            return f"{u} needs {need} hours but its lessons can only use {len(avail)}"
+    return None
+
+
 def physical_check(ctx: StepContext, seconds: float):
     sub = SubModel(ctx, ctx.inst.lessons, protected=False, locks=False, gap_protection=False,
                    assumptions=False)

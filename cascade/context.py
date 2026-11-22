@@ -35,6 +35,24 @@ def _merge_locks(a: Optional[str], b: Optional[str]) -> Optional[str]:
 
 
 @dataclass
+class SolveStats:
+    """Effort counters of one request, filled by every CP-SAT call."""
+    calls: int = 0
+    seconds: float = 0.0
+    max_vars: int = 0
+    max_constraints: int = 0
+    last_vars: int = 0
+    last_constraints: int = 0
+
+    def record(self, n_vars: int, n_cons: int, wall: float) -> None:
+        self.calls += 1
+        self.seconds += wall
+        self.max_vars = max(self.max_vars, n_vars)
+        self.max_constraints = max(self.max_constraints, n_cons)
+        self.last_vars, self.last_constraints = n_vars, n_cons
+
+
+@dataclass
 class StepContext:
     inst: Instance                       # instance after the disruption (Omega^(k+1))
     xk: Timetable                        # x^(k)
@@ -56,6 +74,7 @@ class StepContext:
     delta: int
     ladder: list[int]
     f0: set[str] = field(default_factory=set)
+    stats: SolveStats = field(default_factory=SolveStats)
 
     # ---------------------------------------------------------------- build
     @classmethod

@@ -20,6 +20,7 @@ class Disruption:
     lesson: Optional[str] = None
     slots: Optional[list[tuple[int, int]]] = None    # (day, hour), 1-based; None = whole week
     capacity: Optional[int] = None
+    capacities: Optional[dict[str, int]] = None      # capacity_change of several rooms at once
     day: Optional[int] = None
     hour: Optional[int] = None
     voluntary: bool = True
@@ -63,7 +64,10 @@ def apply(inst: Instance, d: Disruption) -> tuple[Instance, Optional[MoveRequest
     elif d.kind == "time_unavailable":
         new.closed |= _slots(inst, d.slots)
     elif d.kind == "capacity_change":
-        new.rooms[d.room].capacity = d.capacity
+        if d.room is not None:
+            new.rooms[d.room].capacity = d.capacity
+        for r, cap in (d.capacities or {}).items():
+            new.rooms[r].capacity = cap
     elif d.kind == "move_request":
         return new, MoveRequest(d.lesson, inst.slot(d.day, d.hour), d.room, d.voluntary)
     else:

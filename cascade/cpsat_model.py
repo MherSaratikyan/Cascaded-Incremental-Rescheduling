@@ -90,6 +90,7 @@ class SolveResult:
     timetable: Optional[Timetable] = None
     core: Optional[list[Item]] = None   # only for INFEASIBLE under assumptions
     value: Optional[int] = None         # objective value, if any
+    bound: Optional[float] = None       # best objective bound (minimisation)
     wall: float = 0.0
     lit_values: dict = field(default_factory=dict)
 
@@ -475,6 +476,7 @@ class SubModel:
         s = self._solver(time_limit)
         st = STATUS[s.solve(m)]
         res = SolveResult(status=st, wall=s.wall_time)
+        self._record(s)
         if res.feasible:
             res.timetable = self._timetable(s)
         elif st == "INFEASIBLE" and self.assumptions:
@@ -489,12 +491,19 @@ class SubModel:
         s = self._solver(time_limit)
         st = STATUS[s.solve(m)]
         res = SolveResult(status=st, wall=s.wall_time)
+        self._record(s)
         if res.feasible:
             res.timetable = self._timetable(s)
             res.value = lin.const if lin.is_const else int(round(s.objective_value))
+            res.bound = float(lin.const) if lin.is_const else float(s.best_objective_bound)
             sol = s.response_proto.solution
             res.lit_values = {i: bool(sol[l]) for i, l in self.lits.items()}
         return res
+
+    def _record(self, s: cp_model.CpSolver) -> None:
+        stats = getattr(self.ctx, "stats", None)
+        if stats is not None:
+            stats.record(len(self.P.variables), len(self.P.constraints), s.wall_time)
 
     def bound(self, lin: Lin, value: int) -> None:
         self._le(lin, value)

@@ -62,6 +62,11 @@ class Result:
     notes: list[str] = field(default_factory=list)
     seconds: float = 0.0
     metrics: dict = field(default_factory=dict)
+    phases: dict = field(default_factory=dict)   # elapsed seconds per phase
+    stages: list = field(default_factory=list)   # (stage, status, value, bound) of P* and (14)
+
+    def phase(self, name: str) -> None:          # replaced by the driver's timer
+        pass
 
     @property
     def solved(self) -> bool:
