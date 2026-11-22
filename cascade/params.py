@@ -34,9 +34,12 @@ class Params:
     # maximum size mu of a minimal correction set, and how many to enumerate
     mcs_max_size: int = 3
     mcs_max_count: int = 3
-    # time limits (seconds)
-    time_limit: float = 30.0            # shared by all sub-problems of one request
-    explain_time_limit: float = 10.0    # MUS / MCS / physical check
+    # time limits (seconds).  The exact methods get a 1-hour *safety cap*: in
+    # practice CP-SAT either finds a solution or proves infeasibility well before
+    # it; a request that still hits the cap is reported as an algorithmic failure.
+    time_limit: float = 3600.0          # shared by all sub-problems of one request
+    explain_time_limit: float = 3600.0  # MUS / MCS / physical check
+    b6_time_limit: float = 30.0         # B6 is a heuristic: it can never prove infeasibility
     workers: int = 8                    # CP-SAT search workers
     light_presolve_above: int = 5000    # models with more x-variables skip probing/symmetry
     single_worker_below: int = 3000     # models with fewer x-variables use one worker

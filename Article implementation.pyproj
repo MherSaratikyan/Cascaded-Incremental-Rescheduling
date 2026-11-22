@@ -69,6 +69,7 @@
     <Compile Include="experiments\runner.py" />
     <Compile Include="experiments\scenarios.py" />
     <Compile Include="tests\conftest.py" />
+    <Compile Include="tests\test_charts.py" />
     <Compile Include="tests\test_claims.py" />
     <Compile Include="tests\test_examples.py" />
     <Compile Include="tests\test_gaps.py" />

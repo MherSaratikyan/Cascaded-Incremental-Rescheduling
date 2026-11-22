@@ -1,13 +1,14 @@
-"""Performance smoke tier (``pytest -m perf``, about 20-30 minutes).
+"""Performance tier (``pytest -m perf``; with the 1-hour safety cap it can take
+from about an hour to several hours on a laptop).
 
 Scenarios H1 (room closed for a week), H5 (10 voluntary requests), H7 (H1
 under dense regulation) and H9 (room closed for one day, gap protection off -
 usually repairable, so the distance P_k / P_k* to the proven optimum is
-measured) on sizes S and M, methods B7 (proposed) and B4
-(regulation-limited full re-optimisation), plus the reference run REF (B4 with
-a long limit) for the single-request scenarios.  Every request runs in a fresh
-process, exactly as in ``python -m experiments.perf``; the tests assert budgets
-and invariants on the measured rows.
+measured) on sizes S and M, and H1/H5/H9 on the two smallest ITC 2019(-style)
+instances in experiments/itc.  Methods: B7 (proposed) and B4 (full
+re-optimisation under the same regulation); B4's own proven P* is the optimum
+P_k*.  Every request runs in a fresh process with a 1-hour cap, so in practice
+each ends with a proven outcome (solution, or proven infeasibility).
 
 When the tier finishes, the measured rows are merged into
 ``experiments/results/perf_tests.csv`` (a partial run such as ``-k H9`` replaces
@@ -20,24 +21,25 @@ from pathlib import Path
 import pytest
 
 from experiments.generator import ITC_DIR, itc_sizes
-from experiments.perf import FIELDS, REF, run_sequence
+from experiments.perf import CAP, FIELDS, REFERENCE_METHOD, run_sequence
 
 pytestmark = pytest.mark.perf
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "experiments" / "results"
-TIME_LIMIT, EXPLAIN, REF_TIME, GUARD_MB, MARGIN = 30.0, 10.0, 120.0, 3072.0, 15.0
-# real ITC 2019 instances, when downloaded into experiments/itc: the two smallest files
+TIME_LIMIT, EXPLAIN, GUARD_MB, MARGIN = CAP, CAP, 3072.0, 60.0
+# ITC 2019(-style) instances in experiments/itc: the two smallest files
 ITC = sorted(itc_sizes(), key=lambda s: (ITC_DIR / f"{s[4:]}.xml").stat().st_size)[:2]
 CASES = ([(size, sid) for size in ("S", "M") for sid in ("H1", "H5", "H7", "H9")]
          + [(size, sid) for size in ITC for sid in ("H1", "H5", "H9")])
 SINGLE_CASES = [c for c in CASES if c[1] != "H5"]
+TIMEOUTS = {"algorithmic_failure", "killed_timeout"}
 _cache: dict = {}
 
 
 @pytest.fixture(scope="module", autouse=True)
 def save_results_and_charts():
-    """After the last perf test: write every measured row to perf_tests.csv
+    """After the last perf test: merge every measured row into perf_tests.csv
     and build report.md with the elapsed / memory / P_k/P_k* / outcome charts."""
     yield
     rows = [r for rs in _cache.values() for r in rs]
@@ -53,7 +55,7 @@ def save_results_and_charts():
         with path.open(newline="", encoding="utf-8") as fh:
             rd = csv.DictReader(fh)
             if rd.fieldnames == FIELDS:
-                kept = [r for r in rd if tuple(r[k] for k in key) not in fresh]
+                kept = [r for r in rd if tuple(r[k] for k in key) not in fresh and r["method"] != "REF"]
     with path.open("w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=FIELDS, extrasaction="ignore")
         w.writeheader()
@@ -69,17 +71,26 @@ def rows_for(size: str, sid: str, method: str) -> list[dict]:
     if key not in _cache:
         _cache[key] = run_sequence(dict(
             size=size, seed=1, scenario=sid, method=method, time_limit=TIME_LIMIT,
-            ref_time=REF_TIME, explain_time=EXPLAIN, mem_limit_mb=GUARD_MB, solver_workers=2,
+            explain_time=EXPLAIN, mem_limit_mb=GUARD_MB, solver_workers=2,
             cache=str(ROOT / "experiments" / "instances")))
     return _cache[key]
+
+
+def proven_optimum(size: str, sid: str):
+    """P_k* = B4's P* when B4 solved the request and proved P* optimal."""
+    ref = rows_for(size, sid, REFERENCE_METHOD)[0]
+    if ref["outcome"] == "solved" and ref.get("pstar_proven"):
+        return float(ref["pstar"]), ref
+    return None, ref
 
 
 @pytest.mark.parametrize("size,sid", CASES)
 @pytest.mark.parametrize("method", ["B7", "B4"])
 def test_requests_finish_within_time_and_memory_budget(size, sid, method):
     """Every request ends with a real outcome (no crash, no memory-guard kill),
-    its elapsed wall-clock time stays within time limit + explanation limit +
-    15 s of model building, and its peak committed memory stays under 3 GB."""
+    its elapsed wall-clock time stays within the 1-hour search cap + the 1-hour
+    explanation cap + 60 s of model building, and its peak committed memory
+    stays under 3 GB."""
     for r in rows_for(size, sid, method):
         assert r["outcome"] not in ("error", "crashed", "memory_limit", "killed_timeout"), r
         assert float(r["elapsed_s"]) <= TIME_LIMIT + EXPLAIN + MARGIN, r
@@ -103,47 +114,37 @@ def test_proposed_method_never_breaks_regulation(size, sid):
 
 @pytest.mark.parametrize("size", ["S", "M"] + ITC)
 def test_feasible_scenario_measures_distance_to_optimum(size):
-    """H9 (one room closed for one day, gap protection off) is repairable: the
-    reference proves the optimum P_k* (required on S; on M and ITC instances
-    only if it finishes within its limit), B7 solves the request without
-    regulation violations, and its P_k / P_k* (>= 1) is recorded for the report."""
-    ref = rows_for(size, "H9", REF)[0]
+    """H9 (one room closed for one day, gap protection off) is repairable: B4
+    proves the optimum P_k* (required on S; elsewhere skipped only if B4 still
+    hit the 1-hour cap), B7 solves the request without regulation violations,
+    and its P_k / P_k* (>= 1) is recorded for the report."""
+    star, ref = proven_optimum(size, "H9")
     b7 = rows_for(size, "H9", "B7")[0]
-    if size != "S" and not (ref["outcome"] == "solved" and ref.get("pstar_proven")):
-        pytest.skip(f"{size} reference not proven within {REF_TIME:g} s: {ref['outcome']}")
-    assert ref["outcome"] == "solved" and ref.get("pstar_proven"), ref["outcome"]
+    if size != "S" and star is None:
+        pytest.skip(f"{size}: B4 did not prove P* within the cap: {ref['outcome']}")
+    assert star is not None, ref["outcome"]
     assert b7["outcome"] == "solved", b7["outcome"]
-    star, pk = float(ref["pstar"]), float(b7["P_k"])
-    assert pk >= star
+    assert float(b7["P_k"]) >= star
     assert int(b7["protected_violations"]) == int(b7["lock_violations"]) == 0
 
 
-@pytest.mark.parametrize("size,sid", [c for c in SINGLE_CASES])
+@pytest.mark.parametrize("size,sid", SINGLE_CASES)
 def test_changes_never_below_the_proven_optimum(size, sid):
-    """P_k of any regulation-respecting solution is >= the proven optimum
-    P_k* of the reference run (P_k / P_k* >= 1), and B4 attains it when both
-    are proven optimal."""
-    ref = rows_for(size, sid, REF)[0]
-    if ref["outcome"] != "solved" or not ref.get("pstar_proven"):
-        pytest.skip(f"reference not proven: {ref['outcome']}")
-    star = float(ref["pstar"])
-    for method in ("B7", "B4"):
-        r = rows_for(size, sid, method)[0]
-        if r["outcome"] == "solved":
-            assert float(r["P_k"]) >= star, (method, r["P_k"], star)
-    b4 = rows_for(size, sid, "B4")[0]
-    if b4["outcome"] == "solved" and b4.get("pstar_proven"):
-        assert float(b4["pstar"]) == star
+    """P_k of B7's regulation-respecting solution is >= the proven optimum P_k*
+    (B4's proven P*), i.e. P_k / P_k* >= 1."""
+    star, ref = proven_optimum(size, sid)
+    if star is None:
+        pytest.skip(f"no proven optimum: B4 outcome {ref['outcome']}")
+    r = rows_for(size, sid, "B7")[0]
+    if r["outcome"] == "solved":
+        assert float(r["P_k"]) >= star, (r["P_k"], star)
 
 
-@pytest.mark.parametrize("size,sid", CASES)
+@pytest.mark.parametrize("size,sid", SINGLE_CASES)
 def test_outcome_classes_agree_between_b7_and_b4(size, sid):
-    """For single-request scenarios both exact methods reach the same verdict
-    whenever neither ran out of time (Claim 2: full expansion = B4)."""
-    if sid == "H5":
-        pytest.skip("sequences diverge after the first step")
+    """Both exact methods reach the same verdict - solved, or proven infeasible
+    (Claim 2: full expansion = B4) - unless one still hit the 1-hour cap."""
     a, b = rows_for(size, sid, "B7")[0], rows_for(size, sid, "B4")[0]
-    timeouts = {"algorithmic_failure", "killed_timeout"}
-    if a["outcome"] in timeouts or b["outcome"] in timeouts:
-        pytest.skip(f"time limit reached: B7={a['outcome']}, B4={b['outcome']}")
+    if a["outcome"] in TIMEOUTS or b["outcome"] in TIMEOUTS:
+        pytest.skip(f"1-hour cap reached: B7={a['outcome']}, B4={b['outcome']}")
     assert (a["outcome"] == "solved") == (b["outcome"] == "solved"), (a["outcome"], b["outcome"])

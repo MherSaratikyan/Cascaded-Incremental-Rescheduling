@@ -145,7 +145,7 @@ class _State:
 def b6_local_search(ctx: StepContext) -> Result:
     p = ctx.params
     t_start = time.perf_counter()
-    dl = Deadline(p.time_limit)
+    dl = Deadline(min(p.time_limit, p.b6_time_limit))
     rng = random.Random(p.seed)
     inst = ctx.inst
     res = Result(outcome=Outcome.ALGORITHMIC_FAILURE, method="B6", review=list(ctx.review))

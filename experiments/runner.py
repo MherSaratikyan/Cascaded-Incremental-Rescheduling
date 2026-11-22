@@ -4,8 +4,8 @@ Every (size, seed, method, time limit, U^P variant) runs one disruption
 sequence of 5-20 steps on its own trajectory (each method commits its own
 x^(k+1)); one CSV row is written per request.
 
-    python -m experiments.runner                      # S and M, 20 seeds, all methods, 30 s
-    python -m experiments.runner --quick              # smoke run (S, 2 seeds, 5 steps, 10 s)
+    python -m experiments.runner                      # S and M, 20 seeds, all methods, 1 h cap
+    python -m experiments.runner --quick              # smoke run (S, 2 seeds, 5 steps, 10 s cap)
     python -m experiments.runner --sizes L --time-limits 10 30 60 --up groups lecturers both
 
 Runs resume: rows already in --out are skipped.
@@ -42,7 +42,7 @@ def run_task(task: dict) -> list[dict]:
     seq = generate_sequence(inst, task["seed"], steps=task.get("steps"))
     protected, locks = sample_regulation(inst, task["seed"], task["rho"], task["lam"])
     tl = task["time_limit"]
-    params = Params(time_limit=tl, explain_time_limit=min(10.0, tl), workers=task["solver_workers"],
+    params = Params(time_limit=tl, explain_time_limit=tl, workers=task["solver_workers"],
                     gap_protect=task["U_P"], seed=task["seed"])
     state = State(inst, x0, x0, locks, protected, None)
     rows = []
@@ -73,7 +73,8 @@ def main(argv=None) -> None:
     ap.add_argument("--sizes", nargs="+", default=["S", "M"])
     ap.add_argument("--seeds", type=int, default=20, help="seeds 1..N")
     ap.add_argument("--methods", nargs="+", default=list(METHODS))
-    ap.add_argument("--time-limits", nargs="+", type=float, default=[30.0])
+    ap.add_argument("--time-limits", nargs="+", type=float, default=[3600.0],
+                    help="per-request safety cap in seconds (default 1 h: run until proven)")
     ap.add_argument("--up", nargs="+", default=["groups"], choices=["groups", "lecturers", "both"])
     ap.add_argument("--rho", type=float, default=0.2)
     ap.add_argument("--lam", type=float, default=0.1)

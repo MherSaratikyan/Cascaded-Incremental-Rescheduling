@@ -36,10 +36,17 @@ counters belong to that request alone. Each row of the result CSVs records:
 | Time | `elapsed_s` (real wall-clock time of the request), `cpu_s`, `startup_s` (process start and imports, excluded from `elapsed_s`), `process_wall_s`, phases `t_search` / `t_optimise` / `t_extra` / `t_explain`, `solver_seconds`, `solver_calls` |
 | Memory (MB) | `peak_virtual_mb` (reserved address space), `peak_commit_mb` (committed private bytes, Task Manager's "Commit size"), `peak_wset_mb` (physical RAM), `base_commit_mb` and `request_commit_mb` (growth during the request) |
 | Quality | `P_k`, `P_0`, `G`, `dG_plus` (lecturers / groups), `Q_O`, `dV_pref` / `dV_load` / `dV_room`, `changed`, `hours_moved`, `day_changes`, `room_only_moves`, `lecturers_affected`, `groups_affected`, violation counts |
-| Distance from optimal | `P_k / P_k*` and `P_k − P_k*` against a B4 reference run with a 300 s limit (heavy workload, single-request scenarios) |
+| Distance from optimal | `P_k / P_k*` and `P_k − P_k*`, where P_k* is B4's P* when B4 proved it optimal (single-request scenarios) |
 | Certification | `pstar_proven`, `lexmin_proven`, `lexmin_stages`, `opt_gap_max` |
 | Explanations | `mus_size`, `mus_minimal`, `mcs_count`, `mcs_verified` |
 | Effort | `iterations`, `F_ratio`, `max_model_vars`, `max_model_constraints`, `final_model_*` |
+
+**Time limits.** The exact methods (B7, B2–B5) get a **1-hour safety cap per request**, plus 1 hour for
+explanations (MUS / MCS / physical check). In practice CP-SAT finds a solution or proves infeasibility well
+before the cap, so outcomes are proven. A request that still reaches the cap is reported as
+`algorithmic_failure`. B6 is a heuristic that can never prove infeasibility, so it keeps a 30 s limit
+(`b6_time_limit`). `runner --quick` keeps 10 s. All of these are in `cascade/params.py` and on the command
+lines (`--time-limit`, `--explain-time`).
 
 A parent-side guard kills a request process whose committed memory passes `--mem-limit-mb`
 (default 3072). The row then records `memory_limit`, or `killed_timeout` for a hung process.
@@ -53,11 +60,13 @@ Three test tiers:
 ```
 
 1. **Unit and paper tests** (`pytest`): about 3 minutes, and it prints the elapsed time of every test case.
-2. **Performance smoke tests** (`pytest -m perf`): about 20–30 minutes, with budgets and invariants on S and M.
+2. **Performance tests** (`pytest -m perf`): from about an hour to several hours with the 1-hour cap, with
+   budgets and invariants on S, M and the two smallest ITC(-style) instances.
    They also write `experiments/results/perf_tests.csv` and the four charts into
    `experiments/results/perf_tests_report/`.
-3. **Heavy workload** (`experiments.perf`): about 9–10 hours and resumable. It runs scenarios H1–H9
-   on S, M, L and XL (60 / 200 / 500 / 1000 lessons) with all methods plus the reference, and writes
+3. **Heavy workload** (`experiments.perf`): hours to days with the 1-hour cap, and resumable. It runs
+   scenarios H1–H9 on S, M, L and XL (60 / 200 / 500 / 1000 lessons) and the ITC(-style) instances with all
+   methods, and writes
    `experiments/results/perf.csv` and `experiments/results/perf_report/report.md` with four charts:
    elapsed time vs size, peak memory vs size, P_k/P_k*, and the outcome mix.
 

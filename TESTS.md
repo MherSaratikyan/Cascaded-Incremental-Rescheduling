@@ -9,7 +9,8 @@ Three tiers. Every run prints a table with the **elapsed (wall-clock) time of ea
 ```
 
 The first runs the 43 unit and paper tests (about 40 s), the second the performance smoke tests
-(about 20–30 min), and the third the full heavy workload (about 9–10 h).
+(about an hour to several hours with the 1-hour per-request cap), and the third the full heavy workload
+(hours to days).
 
 To run every pytest test in one go (tiers 1 and 2, 71 test cases):
 
@@ -91,21 +92,27 @@ These run on the hand-written `examples/itc_sample.xml` and a generated ITC-styl
 | `test_itc_style_generator_writes_the_official_format` | The generator's XML has the ITC features (MWF/TTh, odd weeks, parents, room-less classes, travel, students, required and soft distributions of many types) and loads through the loader. |
 | `test_voluntary_request_for_another_time_pattern` | A request naming one of the class's own ITC time patterns is solved, and the class ends up there. |
 
-## Tier 2: performance smoke tests (`pytest -m perf`)
+### `tests/test_charts.py`: chart layout
+
+| Test | Expected result and why |
+|---|---|
+| `test_charts_have_no_overlapping_text[hy / en]` | All chart files (elapsed, memory, P_k/P_k*, outcome mix for synthetic and ITC instances) are drawn from worst-case dummy data: all 7 methods, all 9 outcome groups, 9 sizes including long ITC names, in Armenian and English. No tick label, axis title, panel title or legend entry may overlap another, no legend may cover a panel, and no text may stick out of the figure. The test measures the drawn bounding boxes. |
+
+## Tier 2: performance tests (`pytest -m perf`)
 
 When ITC instances, real or generated, are present in `experiments/itc`, the two smallest are added to this tier
 with scenarios H1, H5 and H9. The H9 distance-to-optimum test covers them too.
 
 These run scenarios H1, H5, H7 and H9 on sizes S (60 lessons) and M (200 lessons) with seed 1. The methods are
-B7 and B4, plus the reference REF (B4 with a 120 s limit) for H1, H7 and H9. **Every request runs in a fresh
+B7 and B4, each request with a 1-hour safety cap; B4's proven P* is the optimum P_k*. **Every request runs in a fresh
 process**, exactly as in the heavy workload, and the tests check the measured rows:
 
 | Test | Expected result and why |
 |---|---|
-| `test_requests_finish_within_time_and_memory_budget[method-size-scenario]` | No crash or memory-guard kill. Elapsed time ≤ 30 s limit + 10 s explanations + 15 s model building. Peak committed memory < 3 GB. |
+| `test_requests_finish_within_time_and_memory_budget[method-size-scenario]` | No crash or memory-guard kill. Elapsed time ≤ 1 h search cap + 1 h explanation cap + 60 s model building. Peak committed memory < 3 GB. |
 | `test_proposed_method_never_breaks_regulation[size-scenario]` | Every B7 solution has zero hard, protected, lock and gap-protection violations, and every proposed MCS is verified. |
-| `test_feasible_scenario_measures_distance_to_optimum[size]` | On H9 the reference proves the optimum P_k* (required on S, on M if it finishes within 120 s). B7 solves the request without regulation violations, and its P_k / P_k* (≥ 1) goes into the report. |
-| `test_changes_never_below_the_proven_optimum[size-scenario]` | P_k / P_k* ≥ 1 for B7 and B4 against the proven optimum of REF. B4 attains P_k* when both are proven. |
+| `test_feasible_scenario_measures_distance_to_optimum[size]` | On H9, B4 proves the optimum P_k* (required on S; elsewhere skipped only if B4 still reaches the 1-hour cap). B7 solves the request without regulation violations, and its P_k / P_k* (≥ 1) goes into the report. |
+| `test_changes_never_below_the_proven_optimum[size-scenario]` | P_k / P_k* ≥ 1 for B7 against B4's proven optimum P_k*. |
 | `test_outcome_classes_agree_between_b7_and_b4[size-scenario]` | Same verdict (solved or not) for single-request scenarios unless one hit the time limit (Claim 2). |
 
 When the tier finishes, every measured row is saved to `experiments/results/perf_tests.csv`, and
@@ -127,7 +134,8 @@ When the tier finishes, every measured row is saved to `experiments/results/perf
 | H9 | The busiest room is closed on its busiest day, with gap protection off | A request that is usually repairable, so P_k / P_k* against the proven optimum can be measured |
 
 Each scenario runs on sizes S, M, L and XL (60 / 200 / 500 / 1000 lessons) with 3, 3, 1 and 1 seeds,
-all 7 methods, a 30 s limit plus 10 s for explanations, and the 300 s B4 reference for the
+all 7 methods, a 1-hour safety cap plus 1 hour for explanations (B6: 30 s), with B4's proven P* as the
+optimum for the
 single-request scenarios. The run is resumable. The results go to `experiments/results/perf.csv`, and
 `experiments/results/perf_report/report.md` holds the tables and the four charts.
 

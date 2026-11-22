@@ -1,12 +1,14 @@
 """Heavy-workload performance run: scenarios H1-H9 on sizes S, M, L, XL and on
-every ITC 2019 instance downloaded into experiments/itc (as ``itc-<problem>``).
+every ITC 2019(-style) instance in experiments/itc (as ``itc-<problem>``).
 
-Every request runs in a fresh process (exact peak memory, memory guard).
-Single-request scenarios also get a reference run "REF" = B4 with a long
-limit, whose proven P* is the optimum P_k* used for P_k / P_k*.
+Every request runs in a fresh process (exact peak memory, memory guard) with a
+1-hour safety cap, so in practice it ends with a proven outcome: a solution, or
+proven physical / regulatory infeasibility.  The optimum P_k* used for
+P_k / P_k* is B4's own P*, whenever B4 proved it optimal (B4 re-optimises the
+whole timetable under the same regulation).
 
-    python -m experiments.perf                         # everything (~9-10 h, resumable)
-    python -m experiments.perf --sizes S --scenarios H1 H5
+    python -m experiments.perf                         # everything (long: hours to days, resumable)
+    python -m experiments.perf --sizes S itc-synth-s   # a smaller selection
     python -m experiments.perf --report-only           # rebuild the report from the CSV
 
 Output: experiments/results/perf.csv and experiments/results/perf_report/ (report.md + charts).
@@ -14,7 +16,6 @@ Output: experiments/results/perf.csv and experiments/results/perf_report/ (repor
 from __future__ import annotations
 
 import argparse
-import csv
 import sys
 import time
 from pathlib import Path
@@ -33,7 +34,9 @@ from experiments.runner import _done_keys, open_csv  # noqa: E402
 KEY = ("size", "seed", "scenario", "method")
 FIELDS = list(KEY) + ["step", "time_limit", "lessons"] + ALL_METRICS
 SEEDS = {"S": 3, "M": 3, "L": 1, "XL": 1}
-REF = "REF"
+CAP = 3600.0          # per-request safety cap (search) and explanation cap, seconds
+REF = "REF"           # legacy reference rows (older CSVs); no longer produced
+REFERENCE_METHOD = "B4"
 
 
 def run_sequence(task: dict) -> list[dict]:
@@ -41,14 +44,13 @@ def run_sequence(task: dict) -> list[dict]:
     rho, lam = (0.5, 0.3) if task["scenario"] == "H7" else (0.2, 0.1)
     protected, locks = sample_regulation(inst, task["seed"], rho, lam)
     hs = sc.build(task["scenario"], inst, x0, task["seed"], locks)
-    is_ref = task["method"] == REF
-    tl = task["ref_time"] if is_ref else task["time_limit"]
+    tl = task["time_limit"]
     params = Params(time_limit=tl, explain_time_limit=task["explain_time"],
                     workers=task["solver_workers"], seed=task["seed"], gap_protect=hs.gap_protect)
     state = State(inst, x0, x0, locks, protected, None)
     rows = []
     for k, dis in enumerate(hs.disruptions):
-        row, new_state = run_isolated(state, dis, params, "B4" if is_ref else task["method"],
+        row, new_state = run_isolated(state, dis, params, task["method"],
                                       mem_limit_mb=task["mem_limit_mb"])
         state = advance_state(state, dis, new_state)
         row.update({f: task[f] for f in KEY}, step=k, time_limit=tl, lessons=len(inst.lessons))
@@ -60,15 +62,15 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sizes", nargs="+", default=["S", "M", "L", "XL"] + itc_sizes(),
                     help="synthetic sizes and itc-<problem> names (default: S M L XL + every "
-                         "ITC 2019 XML in experiments/itc)")
+                         "ITC 2019(-style) XML in experiments/itc)")
     ap.add_argument("--scenarios", nargs="+", default=list(sc.ALL))
     ap.add_argument("--methods", nargs="+", default=list(METHODS))
     ap.add_argument("--seeds", type=int, default=None,
-                    help="seeds per size (default: S/M 3, L/XL 1)")
-    ap.add_argument("--time-limit", type=float, default=30.0)
-    ap.add_argument("--explain-time", type=float, default=10.0)
-    ap.add_argument("--ref-time", type=float, default=300.0)
-    ap.add_argument("--no-ref", action="store_true")
+                    help="seeds per size (default: S/M 3, L/XL and ITC 1)")
+    ap.add_argument("--time-limit", type=float, default=CAP,
+                    help="per-request safety cap for the search, seconds (default 1 h)")
+    ap.add_argument("--explain-time", type=float, default=CAP,
+                    help="cap for MUS / MCS / physical check, seconds (default 1 h)")
     ap.add_argument("--mem-limit-mb", type=float, default=3072)
     ap.add_argument("--solver-workers", type=int, default=2)
     ap.add_argument("--cache", default=str(ROOT / "experiments" / "instances"))
@@ -88,13 +90,10 @@ def main(argv=None) -> None:
                 print(f"instance {size}-{seed}: {len(inst.lessons)} lessons "
                       f"({time.perf_counter() - t:.1f}s)", flush=True)
                 for sid in a.scenarios:
-                    methods = list(a.methods)
-                    if sid in sc.SINGLE and not a.no_ref:
-                        methods.append(REF)
-                    for m in methods:
+                    for m in a.methods:
                         tasks.append(dict(size=size, seed=seed, scenario=sid, method=m,
-                                          time_limit=a.time_limit, ref_time=a.ref_time,
-                                          explain_time=a.explain_time, mem_limit_mb=a.mem_limit_mb,
+                                          time_limit=a.time_limit, explain_time=a.explain_time,
+                                          mem_limit_mb=a.mem_limit_mb,
                                           solver_workers=a.solver_workers, cache=a.cache))
         done = _done_keys(out, FIELDS, KEY)
         todo = [t for t in tasks if tuple(str(t[k]) for k in KEY) not in done]
