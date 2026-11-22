@@ -1,0 +1,122 @@
+      - name: Record environment and verify shared instances
+        run: |
+          mkdir -p benchmark-metadata
+          python -m pip freeze > benchmark-metadata/dependencies.txt
+          python - <<'PY'
+          import hashlib, json, os, platform
+          from pathlib import Path
+          import psutil
+          size = os.environ["BENCH_SIZE"]
+          count = 3 if size in ("S", "M") else 1
+          hashes = {}
+          for seed in range(1, count + 1):
+              path = Path("experiments/instances") / f"{size}-{seed}.json"
+              hashes[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+          data = dict(commit=os.environ["GITHUB_SHA"], os=platform.platform(),
+                      python=platform.python_version(), cpu=platform.processor(),
+                      logical_cpus=psutil.cpu_count(), ram_bytes=psutil.virtual_memory().total,
+                      runner_image=os.environ.get("ImageVersion"),
+                      run_id=os.environ["GITHUB_RUN_ID"],
+                      run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+                      size=size, scenario=os.environ["BENCH_SCENARIO"],
+                      solver_workers=2, instance_sha256=hashes)
+          Path("benchmark-metadata/environment.json").write_text(
+              json.dumps(data, indent=2), encoding="utf-8")
+          PY
+
+      - name: Run all methods sequentially on this VM
+        # A step timeout leaves time for the always() artifact upload.
+        timeout-minutes: 300
+        run: |
+          python -m experiments.perf \
+            --sizes "$BENCH_SIZE" \
+            --scenarios "$BENCH_SCENARIO" \
+            --solver-workers 2 \
+            --time-limit 30 \
+            --explain-time 10 \
+            --ref-time 300 \
+            --mem-limit-mb 3072 \
+            --out "experiments/results/perf-${BENCH_SIZE}-${BENCH_SCENARIO}.csv" \
+            --report-dir "experiments/results/report-${BENCH_SIZE}-${BENCH_SCENARIO}" \
+            2>&1 | tee benchmark-metadata/benchmark.log
+
+      - name: Save this job's results and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-${{ matrix.size }}-${{ matrix.scenario }}
+          path: |
+            experiments/results/
+            benchmark-metadata/
+          retention-days: 7
+
+  report:
+    needs: benchmark
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install pinned dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Download all completed benchmark results
+        uses: actions/download-artifact@v8
+        with:
+          pattern: perf-*
+          path: downloaded-results/
+
+      - name: Include the shared starting timetables
+        uses: actions/download-artifact@v8
+        with:
+          name: benchmark-instances
+          path: experiments/instances/
+
+      - name: Combine CSVs and retain environment records
+        run: |
+          python - <<'PY'
+          import csv, shutil
+          from pathlib import Path
+          from experiments.perf import FIELDS
+          files = sorted(Path("downloaded-results").rglob("perf-*.csv"))
+          if len(files) != 36:
+              raise RuntimeError(f"Expected 36 result CSVs; found {len(files)}")
+          out = Path("experiments/results/perf.csv")
+          out.parent.mkdir(parents=True, exist_ok=True)
+          with out.open("w", newline="", encoding="utf-8") as fh:
+              writer = csv.DictWriter(fh, fieldnames=FIELDS)
+              writer.writeheader()
+              for path in files:
+                  with path.open(newline="", encoding="utf-8") as source:
+                      reader = csv.DictReader(source)
+                      if reader.fieldnames != FIELDS:
+                          raise RuntimeError(f"Unexpected CSV schema: {path}")
+                      rows = list(reader)
+                  if not rows:
+                      raise RuntimeError(f"Empty results: {path}")
+                  writer.writerows(rows)
+          for folder in sorted(Path("downloaded-results").glob("perf-*")):
+              source = folder / "benchmark-metadata"
+              if source.exists():
+                  shutil.copytree(source, Path("benchmark-metadata") / folder.name)
+          print(f"Combined {len(files)} files into {out}")
+          PY
+
+      - name: Generate the combined report and charts
+        run: |
+          python -m experiments.perf_report experiments/results/perf.csv \
+            --out experiments/results/perf_report
+
+      - name: Save combined results, charts, inputs and environment records
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-results
+          path: |
+            experiments/results/
+            experiments/instances/
+            benchmark-metadata/
+          retention-days: 7
