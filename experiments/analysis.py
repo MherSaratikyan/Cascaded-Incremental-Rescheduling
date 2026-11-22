@@ -23,7 +23,8 @@ TESTED = {
     "dG_plus": "lower",
     "Q_O_delta": "lower",
     "F_ratio": "lower",
-    "seconds": "lower",
+    "elapsed_s": "lower",
+    "peak_commit_mb": "lower",
     "protected_violations": "lower",
 }
 
@@ -63,7 +64,8 @@ def per_sequence(df: pd.DataFrame) -> pd.DataFrame:
     agg = solved.groupby(SEQ + ["method"])[["P_k", "dG_plus", "Q_O_delta", "F_ratio",
                                              "protected_violations"]].mean()
     agg["solve_rate"] = d.groupby(SEQ + ["method"])["solved"].mean()
-    agg["seconds"] = d.groupby(SEQ + ["method"])["seconds"].mean()
+    agg["elapsed_s"] = d.groupby(SEQ + ["method"])["elapsed_s"].mean()
+    agg["peak_commit_mb"] = d.groupby(SEQ + ["method"])["peak_commit_mb"].max()
     return agg.reset_index()
 
 
@@ -120,10 +122,16 @@ def report(df: pd.DataFrame) -> str:
         out += ["### Solved requests: mean metrics", "", md_table(solved.groupby("method")[cols].mean()), ""]
         g = g.copy()
         g["class"] = np.where(g["outcome"] == "solved", "solved", "not solved")
-        t = g.pivot_table(index="method", columns="class", values="seconds", aggfunc="median")
-        out += ["### Median time (s): solved vs not solved requests", "", md_table(t), ""]
-        fair = solved.groupby("method")[["lecturers_changed", "groups_changed",
-                                         "dG_lecturers", "dG_groups"]].mean()
+        t = g.pivot_table(index="method", columns="class", values="elapsed_s", aggfunc="median")
+        out += ["### Median elapsed (wall-clock) time (s): solved vs not solved requests", "",
+                md_table(t), ""]
+        mem = g.groupby("method").agg(elapsed_median=("elapsed_s", "median"),
+                                      elapsed_max=("elapsed_s", "max"), cpu_median=("cpu_s", "median"),
+                                      peak_commit_mb_max=("peak_commit_mb", "max"),
+                                      peak_wset_mb_max=("peak_wset_mb", "max"))
+        out += ["### Time and peak memory per request", "", md_table(mem), ""]
+        fair = solved.groupby("method")[["lecturers_affected", "groups_affected", "hours_moved",
+                                         "day_changes", "dG_lecturers", "dG_groups"]].mean()
         out += ["### Distribution of changes and new gaps (mean per solved request)", "", md_table(fair), ""]
         trig = g[g["method"] == PROPOSED]["extra_expansion"].value_counts()
         if len(trig):

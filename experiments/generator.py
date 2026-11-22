@@ -25,8 +25,13 @@ SIZES = {
     "XS": dict(lessons=20, rooms=3, lecturers=5, groups=4),
     "S": dict(lessons=60, rooms=6, lecturers=12, groups=8),
     "M": dict(lessons=200, rooms=15, lecturers=35, groups=25),
-    "L": dict(lessons=500, rooms=30, lecturers=80, groups=60),
+    # L and XL keep the room occupancy of M (~60 % of room-hours), as denser
+    # instances are mostly infeasible already for x^(0)
+    "L": dict(lessons=500, rooms=38, lecturers=80, groups=60),
+    "XL": dict(lessons=1000, rooms=75, lecturers=160, groups=120),
 }
+# sizes whose x^(0) comes from greedy construction + windowed CP-SAT repair
+WINDOWED = {"L", "XL"}
 
 
 def _rng(*parts) -> random.Random:
@@ -225,6 +230,43 @@ def initial_timetable(inst: Instance, time_limit: float = 60.0, workers: int = 8
     return r2.timetable if r2.feasible else r.timetable
 
 
+def windowed_timetable(inst: Instance, time_budget: float = 240.0, window: int = 60,
+                       workers: int = 4, seed: int = 0) -> Optional[Timetable]:
+    """x^(0) for L / XL: greedy construction, then CP-SAT repair of one window
+    at a time (<= ``window`` lessons of one day, kept on that day, everything
+    else fixed), minimising 200*G + Q_O.  Memory per solve stays bounded."""
+    import time as _time
+    from dataclasses import replace as _replace
+    tt = greedy_timetable(inst, seed)
+    if len(tt) < len(inst.lessons) or not ev.hard_violations(inst, tt).ok:
+        return None
+    params = Params(workers=workers, seed=seed)
+    base = StepContext.build(inst, inst, tt, tt, params, gap_protected=set())
+    cache = base.__dict__.setdefault("_gamma_cache", {})
+    H = inst.hours
+    windows: list[list[str]] = []
+    for d in range(1, inst.days + 1):
+        on_day = sorted((e for e in tt if tt[e][0] // H + 1 == d),
+                        key=lambda e: (inst.lessons[e].groups, e))
+        windows += [on_day[i:i + window] for i in range(0, len(on_day), window)]
+    end = _time.perf_counter() + time_budget
+    for i, win in enumerate(windows):
+        left = end - _time.perf_counter()
+        if left <= 1:
+            break
+        om = dict(base.omega)
+        for e in win:
+            d = tt[e][0] // H
+            om[e] = [a for a in base.omega[e] if a[0] // H == d]
+        c = _replace(base, xk=dict(tt), x0=dict(tt), omega=om)
+        c.__dict__["_gamma_cache"] = cache
+        sub = SubModel(c, win, protected=False, locks=False, gap_protection=False, assumptions=False)
+        r = sub.minimize(200 * sub.G + sub.QO, min(20.0, left / (len(windows) - i)), hint=tt)
+        if r.feasible:
+            tt = r.timetable
+    return tt
+
+
 def load_or_generate(size: str, seed: int, cache_dir: Path, time_limit: float = 60.0,
                      workers: int = 8) -> tuple[Instance, Timetable]:
     path = Path(cache_dir) / f"{size}-{seed}.json"
@@ -234,7 +276,11 @@ def load_or_generate(size: str, seed: int, cache_dir: Path, time_limit: float = 
         return inst, io.timetable_from_dict(inst, d["timetable"])
     for sub_seed in range(10):
         inst = generate_instance(size, seed * 100 + sub_seed)
-        x0 = initial_timetable(inst, time_limit, workers, seed)
+        if size in WINDOWED:
+            x0 = windowed_timetable(inst, time_budget=240.0 if size == "L" else 360.0,
+                                    workers=min(workers, 4), seed=seed)
+        else:
+            x0 = initial_timetable(inst, time_limit, workers, seed)
         if x0 is not None:
             io.save_json({"instance": io.instance_to_dict(inst),
                           "timetable": io.timetable_to_dict(inst, x0)}, path)

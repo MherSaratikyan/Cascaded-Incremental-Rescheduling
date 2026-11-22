@@ -24,72 +24,48 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cascade import TimetableStore, handle_request  # noqa: E402
-from cascade import evaluate as ev  # noqa: E402
-from cascade.baselines import METHODS, run_method  # noqa: E402
+from cascade.baselines import METHODS  # noqa: E402
 from cascade.params import Params  # noqa: E402
 from experiments.generator import (generate_sequence, load_or_generate,  # noqa: E402
                                    sample_regulation)
+from experiments.measure import (ALL_METRICS, State, advance_state, run_isolated,  # noqa: E402
+                                 run_request)
 
-FIELDS = ["size", "seed", "method", "time_limit", "U_P", "step", "kind", "voluntary", "outcome",
-          "seconds", "iterations", "F_ratio", "P_k", "P_0", "G", "dG_plus", "Q_O", "Q_O_k",
-          "protected_violations", "lock_violations", "gap_protection_violations",
-          "hard_violations", "changed", "lecturers_changed", "groups_changed",
-          "dG_lecturers", "dG_groups", "extra_expansion", "requires_approval",
-          "mus_size", "mcs_count", "mcs_verified", "attempts"]
 KEY = ("size", "seed", "method", "time_limit", "U_P")
-
-
-def split_new_gaps(ctx, tt):
-    g = ev.gaps(ctx.inst, tt)
-    out = {"lecturer": 0.0, "group": 0.0}
-    for (u, d), v in g.items():
-        part = ctx.inst.participants[u]
-        out[part.kind] += part.weight * max(0, v - ctx.gaps_k.get((u, d), 0))
-    return out
+FIELDS = list(KEY) + ["step"] + ALL_METRICS
 
 
 def run_task(task: dict) -> list[dict]:
+    """One disruption sequence on its own trajectory; each request runs in a
+    fresh process (``isolated``) unless ``task["in_process"]``."""
     inst, x0 = load_or_generate(task["size"], task["seed"], Path(task["cache"]))
     seq = generate_sequence(inst, task["seed"], steps=task.get("steps"))
     protected, locks = sample_regulation(inst, task["seed"], task["rho"], task["lam"])
     tl = task["time_limit"]
     params = Params(time_limit=tl, explain_time_limit=min(10.0, tl), workers=task["solver_workers"],
                     gap_protect=task["U_P"], seed=task["seed"])
-    store = TimetableStore(inst, x0, x0, locks, protected, None)
-    method = task["method"]
+    state = State(inst, x0, x0, locks, protected, None)
     rows = []
     for k, dis in enumerate(seq):
-        h = handle_request(store, dis, params, solver=lambda c: run_method(method, c))
-        r, m = h.result, h.result.metrics
-        row = {f: task.get(f) for f in KEY}
-        row.update(step=k, kind=dis.kind, voluntary=dis.kind == "move_request",
-                   outcome=r.outcome.value, seconds=round(r.seconds, 4),
-                   iterations=len(r.trace), extra_expansion=r.extra_expansion,
-                   requires_approval=r.requires_approval, mus_size=len(r.mus or []),
-                   mcs_count=len(r.mcs), mcs_verified=sum(c.verified for c in r.mcs),
-                   attempts=h.attempts)
-        for f in ("F_ratio", "P_k", "P_0", "G", "dG_plus", "Q_O", "Q_O_k", "protected_violations",
-                  "lock_violations", "gap_protection_violations", "hard_violations"):
-            v = m.get(f)
-            row[f] = round(v, 6) if isinstance(v, float) else v
-        changed = m.get("changed", [])
-        row["changed"] = len(changed)
-        lessons = h.ctx.inst.lessons
-        row["lecturers_changed"] = len({l for e in changed for l in lessons[e].lecturers})
-        row["groups_changed"] = len({g for e in changed for g in lessons[e].groups})
-        if r.timetable is not None:
-            sg = split_new_gaps(h.ctx, r.timetable)
-            row["dG_lecturers"], row["dG_groups"] = sg["lecturer"], sg["group"]
+        if task.get("in_process"):
+            row, new_state = run_request(state, dis, params, task["method"])
+        else:
+            row, new_state = run_isolated(state, dis, params, task["method"],
+                                          mem_limit_mb=task.get("mem_limit_mb", 3072))
+        state = advance_state(state, dis, new_state)
+        row.update({f: task.get(f) for f in KEY}, step=k)
         rows.append(row)
     return rows
 
 
-def _done_keys(path: Path) -> set[tuple]:
+def _done_keys(path: Path, fields: list[str], key=KEY) -> set[tuple]:
     if not path.exists():
         return set()
     with path.open(newline="", encoding="utf-8") as fh:
-        return {tuple(str(row[k]) for k in KEY) for row in csv.DictReader(fh)}
+        rd = csv.DictReader(fh)
+        if rd.fieldnames != fields:          # old format: will be set aside, nothing done
+            return set()
+        return {tuple(str(row[k]) for k in key) for row in rd}
 
 
 def main(argv=None) -> None:
@@ -108,6 +84,10 @@ def main(argv=None) -> None:
     ap.add_argument("--cache", default=str(ROOT / "experiments" / "instances"))
     ap.add_argument("--out", default=str(ROOT / "experiments" / "results" / "run.csv"))
     ap.add_argument("--quick", action="store_true")
+    ap.add_argument("--in-process", action="store_true",
+                    help="run requests in this process (faster, but peak memory is not per request)")
+    ap.add_argument("--mem-limit-mb", type=float, default=3072,
+                    help="memory guard on committed private bytes of a request process")
     a = ap.parse_args(argv)
     if a.quick:
         a.sizes, a.seeds, a.steps, a.time_limits = ["S"], 2, 5, [10.0]
@@ -123,7 +103,7 @@ def main(argv=None) -> None:
             inst, _ = load_or_generate(size, seed, Path(a.cache))
             print(f"  {size}-{seed}: {len(inst.lessons)} lessons ({time.perf_counter() - t:.1f}s)", flush=True)
 
-    done = _done_keys(out)
+    done = _done_keys(out, FIELDS)
     tasks = []
     for size in a.sizes:
         for seed in seeds:
@@ -132,15 +112,23 @@ def main(argv=None) -> None:
                     for method in a.methods:
                         task = dict(size=size, seed=seed, method=method, time_limit=tl, U_P=up,
                                     rho=a.rho, lam=a.lam, steps=a.steps, cache=a.cache,
-                                    solver_workers=a.solver_workers)
+                                    solver_workers=a.solver_workers, in_process=a.in_process,
+                                    mem_limit_mb=a.mem_limit_mb)
                         if tuple(str(task[k]) for k in KEY) not in done:
                             tasks.append(task)
     print(f"{len(tasks)} sequences to run on {a.jobs} processes -> {out}", flush=True)
-    new_file = not out.exists()
-    with out.open("a", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=FIELDS)
-        if new_file:
-            w.writeheader()
+    with open_csv(out, FIELDS) as (fh, w):
+        def report(i, t, rows):
+            w.writerows(rows)
+            fh.flush()
+            solved = sum(r["outcome"] == "solved" for r in rows)
+            print(f"[{i}/{len(tasks)}] {t['size']}-{t['seed']} {t['method']} tl={t['time_limit']} "
+                  f"U_P={t['U_P']}: {solved}/{len(rows)} solved", flush=True)
+
+        if a.jobs <= 1:
+            for i, t in enumerate(tasks, 1):
+                report(i, t, run_task(t))
+            return
         with ProcessPoolExecutor(max_workers=a.jobs) as pool:
             futs = {pool.submit(run_task, t): t for t in tasks}
             for i, f in enumerate(as_completed(futs), 1):
@@ -151,11 +139,31 @@ def main(argv=None) -> None:
                     print(f"[{i}/{len(tasks)}] FAILED {t['size']}-{t['seed']} {t['method']}: {exc!r}",
                           flush=True)
                     continue
-                w.writerows(rows)
-                fh.flush()
-                solved = sum(r["outcome"] == "solved" for r in rows)
-                print(f"[{i}/{len(tasks)}] {t['size']}-{t['seed']} {t['method']} tl={t['time_limit']} "
-                      f"U_P={t['U_P']}: {solved}/{len(rows)} solved", flush=True)
+                report(i, t, rows)
+
+
+class open_csv:
+    """Append to a results CSV; an older file with a different header is
+    renamed to ``*.old.csv`` first so columns never get mixed."""
+
+    def __init__(self, path: Path, fields: list[str]):
+        self.path, self.fields = path, fields
+
+    def __enter__(self):
+        if self.path.exists():
+            with self.path.open(newline="", encoding="utf-8") as fh:
+                header = next(csv.reader(fh), [])
+            if header != self.fields:
+                self.path.replace(self.path.with_suffix(".old.csv"))
+        new = not self.path.exists()
+        self.fh = self.path.open("a", newline="", encoding="utf-8")
+        w = csv.DictWriter(self.fh, fieldnames=self.fields, extrasaction="ignore")
+        if new:
+            w.writeheader()
+        return self.fh, w
+
+    def __exit__(self, *exc):
+        self.fh.close()
 
 
 if __name__ == "__main__":
