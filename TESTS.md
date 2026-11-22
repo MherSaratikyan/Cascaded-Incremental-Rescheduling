@@ -89,6 +89,10 @@ process**, exactly as in the heavy workload, and the tests check the measured ro
 | `test_changes_never_below_the_proven_optimum[size-scenario]` | P_k / P_k* ≥ 1 for B7 and B4 against the proven optimum of REF. B4 attains P_k* when both are proven. |
 | `test_outcome_classes_agree_between_b7_and_b4[size-scenario]` | Same verdict (solved or not) for single-request scenarios unless one hit the time limit (Claim 2). |
 
+When the tier finishes, every measured row is saved to `experiments/results/perf_tests.csv`, and
+`experiments/results/perf_tests_report/` receives `report.md` and the four charts: `elapsed_vs_size.png`,
+`memory_vs_size.png`, `pk_ratio.png` and `outcomes.png`. The pytest summary prints their paths.
+
 ## Tier 3: heavy workload (`python -m experiments.perf`)
 
 | Scenario | Disruption | What it stresses |

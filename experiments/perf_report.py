@@ -336,7 +336,17 @@ def main(argv=None) -> None:
     ap.add_argument("csv")
     ap.add_argument("--out", default="experiments/results/perf_report")
     a = ap.parse_args(argv)
-    print(build_report(Path(a.csv), Path(a.out)))
+    csv_path = Path(a.csv)
+    if not csv_path.exists():
+        results = csv_path.parent
+        found = sorted(p.name for p in results.glob("*.csv")) if results.is_dir() else []
+        raise SystemExit(
+            f"No results file at {csv_path}.\n"
+            "Charts are drawn from measured results; produce them first with one of:\n"
+            "  .venv\\Scripts\\python.exe -m pytest -m perf          (~25 min, writes experiments\\results\\perf_tests.csv)\n"
+            "  .venv\\Scripts\\python.exe -m experiments.perf        (heavy run, ~9-10 h, writes experiments\\results\\perf.csv)\n"
+            + (f"CSV files already in {results}: {', '.join(found)}" if found else ""))
+    print(build_report(csv_path, Path(a.out)))
 
 
 if __name__ == "__main__":

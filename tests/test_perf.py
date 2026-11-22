@@ -6,19 +6,44 @@ under dense regulation) on sizes S and M, methods B7 (proposed) and B4
 a long limit) for the single-request scenarios.  Every request runs in a fresh
 process, exactly as in ``python -m experiments.perf``; the tests assert budgets
 and invariants on the measured rows.
+
+When the tier finishes, all measured rows are saved to
+``experiments/results/perf_tests.csv`` and the report with the four charts is
+built in ``experiments/results/perf_tests_report/``.
 """
+import csv
 from pathlib import Path
 
 import pytest
 
-from experiments.perf import REF, run_sequence
+from experiments.perf import FIELDS, REF, run_sequence
 
 pytestmark = pytest.mark.perf
 
 ROOT = Path(__file__).resolve().parents[1]
+RESULTS = ROOT / "experiments" / "results"
 TIME_LIMIT, EXPLAIN, REF_TIME, GUARD_MB, MARGIN = 30.0, 10.0, 120.0, 3072.0, 15.0
 CASES = [(size, sid) for size in ("S", "M") for sid in ("H1", "H5", "H7")]
 _cache: dict = {}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def save_results_and_charts():
+    """After the last perf test: write every measured row to perf_tests.csv
+    and build report.md with the elapsed / memory / P_k/P_k* / outcome charts."""
+    yield
+    rows = [r for rs in _cache.values() for r in rs]
+    if not rows:
+        return
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    path = RESULTS / "perf_tests.csv"
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=FIELDS, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+    from experiments.perf_report import build_report
+    report = build_report(path, RESULTS / "perf_tests_report")
+    print(f"\nperf results: {path}\nperf report and charts: {report}")
 
 
 def rows_for(size: str, sid: str, method: str) -> list[dict]:

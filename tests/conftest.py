@@ -21,6 +21,9 @@ _ELAPSED: dict[str, float] = {}
 _OUTCOME: dict[str, str] = {}
 
 
+_START = time.time()
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "perf: heavy performance tests (run with: pytest -m perf)")
 
@@ -50,6 +53,12 @@ def pytest_terminal_summary(terminalreporter):
     for n, t in sorted(ran, key=lambda x: -x[1]):
         tr.write_line(f"{t:9.2f} s  {_OUTCOME[n]:<6}  {n[:width]}")
     tr.write_line(f"{sum(t for _, t in ran):9.2f} s  total over {len(ran)} test cases")
+    report = ROOT / "experiments" / "results" / "perf_tests_report" / "report.md"
+    if report.exists() and report.stat().st_mtime >= _START:
+        tr.section("performance report and charts")
+        tr.write_line(f"report : {report}")
+        for png in sorted(report.parent.glob("*.png")):
+            tr.write_line(f"chart  : {png}")
 
 
 @pytest.fixture

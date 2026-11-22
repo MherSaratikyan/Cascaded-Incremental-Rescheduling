@@ -54,6 +54,8 @@ Three test tiers:
 
 1. **Unit and paper tests** (`pytest`): about 3 minutes, and it prints the elapsed time of every test case.
 2. **Performance smoke tests** (`pytest -m perf`): about 20–30 minutes, with budgets and invariants on S and M.
+   They also write `experiments/results/perf_tests.csv` and the four charts into
+   `experiments/results/perf_tests_report/`.
 3. **Heavy workload** (`experiments.perf`): about 9–10 hours and resumable. It runs scenarios H1–H8
    on S, M, L and XL (60 / 200 / 500 / 1000 lessons) with all methods plus the reference, and writes
    `experiments/results/perf.csv` and `experiments/results/perf_report/report.md` with four charts:
