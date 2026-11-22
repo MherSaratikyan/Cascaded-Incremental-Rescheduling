@@ -1,3 +1,163 @@
+name: Rescheduling benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Start with smoke; full runs synthetic sizes S/M/L/XL and H1-H9"
+        type: choice
+        options:
+          - smoke
+          - full
+        default: smoke
+        required: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONUNBUFFERED: "1"
+  PYTHONUTF8: "1"
+  PYTHONHASHSEED: "0"
+  MPLBACKEND: Agg
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+
+jobs:
+  smoke:
+    if: inputs.suite == 'smoke'
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install pinned dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Record environment
+        run: |
+          mkdir -p benchmark-metadata experiments/results
+          python -m pip freeze > benchmark-metadata/dependencies.txt
+          python - <<'PY'
+          import json, os, platform
+          from pathlib import Path
+          import psutil
+          data = dict(commit=os.environ["GITHUB_SHA"], os=platform.platform(),
+                      python=platform.python_version(), cpu=platform.processor(),
+                      logical_cpus=psutil.cpu_count(), ram_bytes=psutil.virtual_memory().total,
+                      runner_image=os.environ.get("ImageVersion"),
+                      run_id=os.environ["GITHUB_RUN_ID"],
+                      run_attempt=os.environ["GITHUB_RUN_ATTEMPT"])
+          Path("benchmark-metadata/environment.json").write_text(
+              json.dumps(data, indent=2), encoding="utf-8")
+          PY
+
+      - name: Unit and paper tests
+        timeout-minutes: 15
+        run: |
+          python -m pytest -m "not perf" -v --durations=0 \
+            --junitxml=experiments/results/unit-tests.xml \
+            2>&1 | tee benchmark-metadata/unit-tests.log
+
+      - name: Performance smoke tests
+        timeout-minutes: 90
+        run: |
+          python -m pytest -m perf -v --durations=0 \
+            --junitxml=experiments/results/performance-tests.xml \
+            2>&1 | tee benchmark-metadata/performance-tests.log
+
+      - name: Save measurements, reports, logs and starting timetables
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-results
+          path: |
+            experiments/results/
+            experiments/instances/
+            benchmark-metadata/
+          retention-days: 7
+
+  prepare:
+    if: inputs.suite == 'full'
+    runs-on: windows-2025
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install pinned dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Generate one shared set of starting timetables
+        timeout-minutes: 300
+        run: |
+          mkdir -p benchmark-metadata
+          python -m pip freeze > benchmark-metadata/prepare-dependencies.txt
+          python - <<'PY' 2>&1 | tee benchmark-metadata/prepare.log
+          from pathlib import Path
+          from experiments.generator import load_or_generate
+          cache = Path("experiments/instances")
+          for size, count in (("S", 3), ("M", 3), ("L", 1), ("XL", 1)):
+              for seed in range(1, count + 1):
+                  inst, _ = load_or_generate(size, seed, cache, workers=2)
+                  print(f"Prepared {size}-{seed}: {len(inst.lessons)} lessons", flush=True)
+          PY
+
+      - name: Save shared starting timetables
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-instances
+          path: experiments/instances/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Save generation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: instance-generation-log
+          path: benchmark-metadata/
+          retention-days: 7
+
+  benchmark:
+    needs: prepare
+    name: "${{ matrix.size }} / ${{ matrix.scenario }}"
+    runs-on: windows-2025
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        size: [S, M, L, XL]
+        scenario: [H1, H2, H3, H4, H5, H6, H7, H8, H9]
+    env:
+      BENCH_SIZE: ${{ matrix.size }}
+      BENCH_SCENARIO: ${{ matrix.scenario }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install pinned dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Download the shared starting timetables
+        uses: actions/download-artifact@v8
+        with:
+          name: benchmark-instances
+          path: experiments/instances/
+
       - name: Record environment and verify shared instances
         run: |
           mkdir -p benchmark-metadata
