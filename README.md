@@ -175,6 +175,24 @@ listed in `benchmark-metadata/benchmark-plan.json`; these are not proofs of
 infeasibility. The smoke workflow also downloads ITC inputs before the perf
 tests select their two smallest XMLs, so its runtime includes those extra cases.
 
+**CI time limits.** GitHub-hosted jobs stop after 6 hours, and the full suite has about 54 jobs with very
+different sizes: from 7 requests for an ITC instance with a single-request scenario, up to 420 for S or M
+with H6. So the workflow does not use one fixed limit per request. Each job gets a **time budget**:
+
+- **benchmark jobs:** 300 minutes, inside a 330-minute step and a 355-minute job;
+- **smoke perf tests:** 240 minutes, set by `PERF_BUDGET_MINUTES`, inside a 280-minute step and a
+  355-minute job.
+
+Before each request, `experiments.perf.TimeBudget` divides the remaining budget by the remaining requests.
+A quarter of that share, at most 60 s, is reserved for process start and model building. The rest is split
+75 / 25 between search and explanations, each capped at 1 hour. So:
+
+- requests that finish fast leave their time to the hard ones;
+- small jobs effectively run until proven;
+- a job can never overrun its budget, even if every request uses all its time.
+
+The same option is available locally with `python -m experiments.perf --budget-minutes N`.
+
 - **CP-SAT settings.** `find_big_linear_overlap` is off (on these models this presolve step
   takes most of the run time). Models with more than 5000 x-variables skip probing and
   symmetry detection. Models with fewer than 3000 use a single worker.

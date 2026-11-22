@@ -15,6 +15,11 @@ from experiments.generator import generate_sequence
 # so the reference optimum P_k* (B4 with a long limit) is comparable
 SINGLE = ("H1", "H2", "H3", "H4", "H7", "H8", "H9")
 ALL = ("H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8", "H9")
+STEPS = {"H5": 10, "H6": 20}      # number of requests per scenario (others: 1)
+
+
+def steps_of(sid: str) -> int:
+    return STEPS.get(sid, 1)
 
 TITLES = {
     "H1": "Room closed for a week (busiest room)",

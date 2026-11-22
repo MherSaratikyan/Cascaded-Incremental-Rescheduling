@@ -32,7 +32,9 @@ jobs:
   smoke:
     if: inputs.suite == 'smoke'
     runs-on: windows-2025
-    timeout-minutes: 210
+    # GitHub-hosted jobs stop at 360 min: setup ~5 + unit tests <= 15 + ITC data <= 45
+    # + performance tests <= 280 + upload, with margin
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -74,7 +76,12 @@ jobs:
             2>&1 | tee benchmark-metadata/itc-data.log
 
       - name: Performance smoke tests
-        timeout-minutes: 120
+        # Every request may run until proven (1-hour caps), but all requests of the
+        # tier share a 240-minute budget: each gets remaining budget / remaining
+        # requests (experiments.perf.TimeBudget), so the step cannot pass 280 min.
+        timeout-minutes: 280
+        env:
+          PERF_BUDGET_MINUTES: "240"
         run: |
           python -m pytest -m perf -v --durations=0 \
             --junitxml=experiments/results/performance-tests.xml \
@@ -194,7 +201,9 @@ jobs:
     needs: prepare
     name: "${{ matrix.size }} / ${{ matrix.scenario }}"
     runs-on: windows-2025
-    timeout-minutes: 350
+    # GitHub-hosted jobs stop at 360 min: setup + downloads ~10, benchmark step <= 330
+    # (300-minute request budget + margin), artifact upload
+    timeout-minutes: 355
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -245,16 +254,19 @@ jobs:
           PY
 
       - name: Run all methods sequentially on this VM
-        # A step timeout leaves time for the always() artifact upload.
-        timeout-minutes: 300
+        # Requests may run until a solution or an infeasibility proof (1-hour caps for
+        # search and explanations), but this job's requests share a 300-minute budget:
+        # each gets remaining budget / remaining requests (21 to 420 requests per job),
+        # so the step stays under its timeout and leaves time for the always() upload.
+        timeout-minutes: 330
         run: |
           python -m experiments.perf \
             --sizes "$BENCH_SIZE" \
             --scenarios "$BENCH_SCENARIO" \
             --solver-workers 2 \
-            --time-limit 30 \
-            --explain-time 10 \
-            --ref-time 300 \
+            --time-limit 3600 \
+            --explain-time 3600 \
+            --budget-minutes 300 \
             --mem-limit-mb 3072 \
             --out "experiments/results/perf-${BENCH_SIZE}-${BENCH_SCENARIO}.csv" \
             --report-dir "experiments/results/report-${BENCH_SIZE}-${BENCH_SCENARIO}" \

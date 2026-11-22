@@ -10,6 +10,7 @@ whole timetable under the same regulation).
     python -m experiments.perf                         # everything (long: hours to days, resumable)
     python -m experiments.perf --sizes S itc-synth-s   # a smaller selection
     python -m experiments.perf --report-only           # rebuild the report from the CSV
+    python -m experiments.perf --sizes S --scenarios H6 --budget-minutes 290   # one CI job
 
 Output: experiments/results/perf.csv and experiments/results/perf_report/ (report.md + charts).
 """
@@ -39,21 +40,70 @@ REF = "REF"           # legacy reference rows (older CSVs); no longer produced
 REFERENCE_METHOD = "B4"
 
 
-def run_sequence(task: dict) -> list[dict]:
+class TimeBudget:
+    """Shares a wall-clock budget over a known number of requests (e.g. one CI
+    job, which must stay under GitHub's 6-hour job limit).
+
+    Before each request its share = remaining budget / remaining requests.  A
+    quarter of the share (at most ``overhead`` seconds) is reserved for process
+    start, instance load and model building - the request process is killed
+    after search + explanations + that reserve - and the rest is split 75 % search
+    / 25 % explanations, each capped at ``cap`` (time the search cannot use goes
+    to the explanations).  So a request never takes more than its share, the job
+    never more than the budget (as long as shares stay above ~2 x ``floor``), and
+    requests that finish early leave their time to later ones."""
+
+    def __init__(self, seconds: float, requests: int, cap: float = CAP,
+                 overhead: float = 60.0, explain_share: float = 0.25, floor: float = 2.0):
+        self.end = time.monotonic() + seconds
+        self.left = max(1, requests)
+        self.cap, self.overhead, self.share, self.floor = cap, overhead, explain_share, floor
+        self._reserve = overhead
+
+    def limits(self) -> tuple[float, float]:
+        share = max(0.0, self.end - time.monotonic()) / max(1, self.left)
+        self._reserve = min(self.overhead, max(1.0, 0.25 * share))
+        usable = max(2 * self.floor, share - self._reserve)
+        search = min(self.cap, max(self.floor, usable * (1 - self.share)))
+        explain = min(self.cap, max(self.floor, usable - search))
+        return round(search, 1), round(explain, 1)
+
+    def done(self) -> None:
+        self.left = max(1, self.left - 1)
+
+    @property
+    def kill_margin(self) -> float:
+        """Reserve of the last :meth:`limits` call (process start, load, build)."""
+        return self._reserve
+
+
+def requests_of(task: dict) -> int:
+    return sc.steps_of(task["scenario"])
+
+
+def run_sequence(task: dict, budget: "TimeBudget | None" = None) -> list[dict]:
     inst, x0 = load_or_generate(task["size"], task["seed"], Path(task["cache"]))
     rho, lam = (0.5, 0.3) if task["scenario"] == "H7" else (0.2, 0.1)
     protected, locks = sample_regulation(inst, task["seed"], rho, lam)
     hs = sc.build(task["scenario"], inst, x0, task["seed"], locks)
-    tl = task["time_limit"]
-    params = Params(time_limit=tl, explain_time_limit=task["explain_time"],
-                    workers=task["solver_workers"], seed=task["seed"], gap_protect=hs.gap_protect)
+    base = Params(time_limit=task["time_limit"], explain_time_limit=task["explain_time"],
+                  workers=task["solver_workers"], seed=task["seed"], gap_protect=hs.gap_protect)
     state = State(inst, x0, x0, locks, protected, None)
     rows = []
     for k, dis in enumerate(hs.disruptions):
+        params, kill_after = base, None
+        if budget is not None:
+            search, explain = budget.limits()
+            params = base.with_(time_limit=min(base.time_limit, search),
+                                explain_time_limit=min(base.explain_time_limit, explain))
+            kill_after = params.time_limit + params.explain_time_limit + budget.kill_margin
         row, new_state = run_isolated(state, dis, params, task["method"],
-                                      mem_limit_mb=task["mem_limit_mb"])
+                                      mem_limit_mb=task["mem_limit_mb"], kill_after=kill_after)
+        if budget is not None:
+            budget.done()
         state = advance_state(state, dis, new_state)
-        row.update({f: task[f] for f in KEY}, step=k, time_limit=tl, lessons=len(inst.lessons))
+        row.update({f: task[f] for f in KEY}, step=k, time_limit=params.time_limit,
+                   lessons=len(inst.lessons))
         rows.append(row)
     return rows
 
@@ -71,6 +121,10 @@ def main(argv=None) -> None:
                     help="per-request safety cap for the search, seconds (default 1 h)")
     ap.add_argument("--explain-time", type=float, default=CAP,
                     help="cap for MUS / MCS / physical check, seconds (default 1 h)")
+    ap.add_argument("--budget-minutes", type=float, default=None,
+                    help="total wall-clock budget for all requests of this run (e.g. a CI job): "
+                         "each request gets remaining budget / remaining requests, capped by "
+                         "--time-limit and --explain-time")
     # accepted for older scripts / CI workflows; no effect: the reference optimum
     # is now B4's own proven P* (no separate REF run)
     ap.add_argument("--ref-time", type=float, default=None, help=argparse.SUPPRESS)
@@ -102,10 +156,17 @@ def main(argv=None) -> None:
         done = _done_keys(out, FIELDS, KEY)
         todo = [t for t in tasks if tuple(str(t[k]) for k in KEY) not in done]
         print(f"{len(todo)} of {len(tasks)} sequences to run -> {out}", flush=True)
+        budget = None
+        if a.budget_minutes:
+            n_req = sum(requests_of(t) for t in todo)
+            budget = TimeBudget(a.budget_minutes * 60, n_req)
+            s, e = budget.limits()
+            print(f"time budget {a.budget_minutes:g} min for {n_req} requests: "
+                  f"first request {s:g} s search + {e:g} s explanations", flush=True)
         with open_csv(out, FIELDS) as (fh, w):
             for i, t in enumerate(todo, 1):
                 t0 = time.perf_counter()
-                rows = run_sequence(t)
+                rows = run_sequence(t, budget)
                 w.writerows(rows)
                 fh.flush()
                 outs = ", ".join(sorted({r["outcome"] for r in rows}))

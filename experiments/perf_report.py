@@ -621,7 +621,10 @@ def build_report(csv_path: Path, out_dir: Path, lang: str = "hy") -> Path:
     df = load(Path(csv_path))
     global SIZE_ORDER
     SIZE_ORDER = size_order(df)
-    limits = sorted(set(df.loc[df["method"] != "REF", "time_limit"].dropna().astype(float))) or [30]
+    # one reference line at the largest per-request search limit used (with a CI
+    # time budget the limit differs from request to request)
+    used = df.loc[df["method"] != "REF", "time_limit"].dropna().astype(float)
+    limits = [float(used.max())] if len(used) else [3600.0]
     CHART_PROBLEMS.clear()
     chart_elapsed(df, out_dir / "elapsed_vs_size.png", limits=tuple(limits))
     chart_memory(df, out_dir / "memory_vs_size.png")

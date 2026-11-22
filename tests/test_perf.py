@@ -16,12 +16,14 @@ only the sequences it re-measured) and the report with the four charts is
 rebuilt in ``experiments/results/perf_tests_report/``.
 """
 import csv
+import os
 from pathlib import Path
 
 import pytest
 
 from experiments.generator import ITC_DIR, itc_sizes
-from experiments.perf import CAP, FIELDS, REFERENCE_METHOD, run_sequence
+from experiments.perf import CAP, FIELDS, REFERENCE_METHOD, TimeBudget, run_sequence
+from experiments.scenarios import steps_of
 
 pytestmark = pytest.mark.perf
 
@@ -66,13 +68,27 @@ def save_results_and_charts():
     print(f"\nperf results: {path}\nperf report and charts: {report}")
 
 
+_budget: list = []
+
+
+def budget():
+    """With PERF_BUDGET_MINUTES set (CI), all requests of the tier share that
+    wall-clock budget (see experiments.perf.TimeBudget); otherwise each request
+    simply gets the 1-hour caps."""
+    if not _budget:
+        minutes = float(os.environ.get("PERF_BUDGET_MINUTES") or 0)
+        planned = sum(2 * steps_of(sid) for _, sid in CASES)      # B7 and B4
+        _budget.append(TimeBudget(minutes * 60, planned) if minutes > 0 else None)
+    return _budget[0]
+
+
 def rows_for(size: str, sid: str, method: str) -> list[dict]:
     key = (size, sid, method)
     if key not in _cache:
         _cache[key] = run_sequence(dict(
             size=size, seed=1, scenario=sid, method=method, time_limit=TIME_LIMIT,
             explain_time=EXPLAIN, mem_limit_mb=GUARD_MB, solver_workers=2,
-            cache=str(ROOT / "experiments" / "instances")))
+            cache=str(ROOT / "experiments" / "instances")), budget())
     return _cache[key]
 
 
